@@ -46,10 +46,10 @@ export type LigneComptage = { piece_id: number; compte: number };
 export function lireLignesComptage(v: unknown): LigneComptage[] {
   if (!Array.isArray(v)) erreur("Liste de comptage invalide.");
   const lignes = v.map((l: Record<string, unknown>) => ({
-    piece_id: entier(l?.piece_id, "pièce", 1),
+    piece_id: entier(l?.piece_id, "article", 1),
     compte: entier(l?.compte, "quantité comptée", 0),
   }));
-  if (new Set(lignes.map((l) => l.piece_id)).size !== lignes.length) erreur("Une pièce apparaît deux fois dans le comptage.");
+  if (new Set(lignes.map((l) => l.piece_id)).size !== lignes.length) erreur("Un même élément apparaît deux fois dans le comptage.");
   return lignes;
 }
 
@@ -60,7 +60,7 @@ export async function lirePieces(db: D1Database, ids: number[]) {
   const { results } = await db.prepare(
     `SELECT p.id, p.nom, p.suivi, ${STOCK_SQL} AS stock FROM piece p WHERE p.id IN (${uniques.map(() => "?").join(",")})`,
   ).bind(...uniques).all<{ id: number; nom: string; suivi: string; stock: number }>();
-  if (results.length !== uniques.length) erreur("Pièce introuvable.", 404);
+  if (results.length !== uniques.length) erreur("Article ou fourniture introuvable.", 404);
   return new Map(results.map((p) => [p.id, p]));
 }
 

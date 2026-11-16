@@ -5,7 +5,7 @@ import { recettes } from "./recettes";
 import { salons } from "./salons";
 import { atelier } from "./atelier";
 import { questions } from "./questions";
-import { bilan } from "./bilan";
+import { bilan, articleThermometre } from "./bilan";
 import { achats } from "./achats";
 import { importer } from "./sumup";
 import { controlerAcces } from "./acces";
@@ -15,6 +15,17 @@ import PAGE from "../public/index.html";
 import STYLE from "../public/style.css";
 // @ts-expect-error : idem
 import SCRIPT from "../public/app.js";
+
+const empreintes = new Map<string, string>();
+async function empreinte(contenu: string) {
+  let e = empreintes.get(contenu);
+  if (!e) {
+    const h = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(contenu)));
+    e = '"' + [...h.slice(0, 12)].map((x) => x.toString(16).padStart(2, "0")).join("") + '"';
+    empreintes.set(contenu, e);
+  }
+  return e;
+}
 
 const FICHIERS: Record<string, [string, string]> = {
   "/style.css": [STYLE as string, "text/css; charset=utf-8"],
@@ -84,7 +95,7 @@ app.patch("/pieces/:id", async (c) => {
   if (!sets.length) erreur("Rien à modifier.");
   try {
     const r = await c.env.DB.prepare(`UPDATE piece SET ${sets.join(", ")} WHERE id = ?`).bind(...vals, id).run();
-    if (!r.meta.changes) erreur("Pièce introuvable.", 404);
+    if (!r.meta.changes) erreur("Article ou fourniture introuvable.", 404);
   } catch (e) {
     if (String(e).includes("UNIQUE")) erreur("Ce nom existe déjà dans cette famille.", 409);
     if (String(e).includes("FOREIGN KEY")) erreur("Famille introuvable.", 404);
@@ -129,7 +140,7 @@ app.post("/comptages", async (c) => {
   const lignes = lireLignesComptage(b.lignes);
   if (!lignes.length) erreur("Aucune quantité comptée.");
   const pieces = await lirePieces(c.env.DB, lignes.map((l) => l.piece_id));
-  if ([...pieces.values()].some((p) => p.suivi !== "quantite")) erreur("Cette pièce ne se compte pas (sans quantité ou générique).");
+  if ([...pieces.values()].some((p) => p.suivi !== "quantite")) erreur("Cet élément ne se compte pas (sans quantité ou générique).");
 
   const db = c.env.DB;
   const res = await db.batch([
@@ -140,6 +151,25 @@ app.post("/comptages", async (c) => {
   ]);
   const detail = res[res.length - 1].results as { ecart: number; comptage_id: number }[];
   return c.json({ comptage_id: detail[0]?.comptage_id, lignes: detail, ecarts: detail.filter((d) => d.ecart !== 0).length }, 201);
+});
+
+// ───────────── Réglages (clé / valeur) ─────────────
+const REGLAGES_MODIFIABLES = ["article_thermometre", "seuil_jours", "marge", "marge_unique", "regroupement_auto", "tampons_min_ratio"];
+app.get("/reglages", async (c) => {
+  const { results } = await c.env.DB.prepare("SELECT cle, valeur FROM reglage").all<{ cle: string; valeur: string }>();
+  const r = Object.fromEntries(results.filter((x) => REGLAGES_MODIFIABLES.includes(x.cle)).map((x) => [x.cle, x.valeur]));
+  return c.json({ ...r, article_thermometre_effectif: await articleThermometre(c.env.DB) });
+});
+app.put("/reglages", async (c) => {
+  const b = await corps(c);
+  const cle = choix(b.cle, REGLAGES_MODIFIABLES, "réglage");
+  if (b.valeur === null || b.valeur === "") await c.env.DB.prepare("DELETE FROM reglage WHERE cle = ?").bind(cle).run();
+  else {
+    const v = Number(b.valeur);
+    if (!Number.isFinite(v) || v < 0) erreur("Valeur invalide.");
+    await c.env.DB.prepare("INSERT INTO reglage (cle, valeur) VALUES (?, ?) ON CONFLICT (cle) DO UPDATE SET valeur = excluded.valeur").bind(cle, String(v)).run();
+  }
+  return c.json({ ok: true });
 });
 
 app.route("/", recettes);
@@ -163,7 +193,10 @@ export default {
     if (refus) return refus;
     if (new URL(req.url).pathname.startsWith("/api/")) return app.fetch(req, env, ctx);
     const [contenu, type] = FICHIERS[new URL(req.url).pathname] ?? [PAGE as string, "text/html; charset=utf-8"];
-    return new Response(contenu, { headers: { "Content-Type": type, "Cache-Control": "no-cache" } });
+    // Le navigateur garde les fichiers et redemande seulement « a-t-il changé ? » (réponse 304, vide).
+    const etag = await empreinte(contenu);
+    if (req.headers.get("If-None-Match") === etag) return new Response(null, { status: 304, headers: { ETag: etag } });
+    return new Response(contenu, { headers: { "Content-Type": type, "Cache-Control": "private, no-cache", ETag: etag } });
   },
   // Cron : import des ventes SumUp par tranches.
   async scheduled(_evt: ScheduledController, env: Env, ctx: ExecutionContext) {

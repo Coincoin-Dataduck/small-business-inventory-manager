@@ -23,21 +23,21 @@ function lireEtape(b: Record<string, unknown>): EtapeSaisie {
   }
   const ordre = b.ordre === undefined ? 0 : entier(b.ordre, "ordre");
   if (!Array.isArray(b.utilise)) erreur("« utilise » doit être une liste.");
-  if (!Array.isArray(b.donne) || !b.donne.length) erreur("Une étape doit donner au moins une pièce.");
-  const utilise = b.utilise.map((u: Record<string, unknown>) => ({ piece_id: entier(u?.piece_id, "pièce utilisée", 1), quantite: entier(u?.quantite, "quantité utilisée", 1) }));
-  if (new Set(utilise.map((u) => u.piece_id)).size !== utilise.length) erreur("Une pièce apparaît deux fois dans « utilise ».");
+  if (!Array.isArray(b.donne) || !b.donne.length) erreur("Une étape doit donner au moins quelque chose.");
+  const utilise = b.utilise.map((u: Record<string, unknown>) => ({ piece_id: entier(u?.piece_id, "ce qu'elle utilise", 1), quantite: entier(u?.quantite, "quantité utilisée", 1) }));
+  if (new Set(utilise.map((u) => u.piece_id)).size !== utilise.length) erreur("Un même élément apparaît deux fois dans « utilise ».");
   const donne: Donne[] = b.donne.map((d: Record<string, unknown>) => {
     if (d?.au_choix) {
-      if (!Array.isArray(d.choix) || d.choix.length < 2) erreur("Une sortie au choix doit proposer au moins deux pièces.");
-      const ch = d.choix.map((x: Record<string, unknown>) => ({ piece_id: entier(x?.piece_id, "pièce au choix", 1), poids: entier(x?.poids ?? 1, "poids", 1) }));
-      if (new Set(ch.map((x) => x.piece_id)).size !== ch.length) erreur("Une pièce apparaît deux fois dans le choix.");
+      if (!Array.isArray(d.choix) || d.choix.length < 2) erreur("Une sortie au choix doit proposer au moins deux possibilités.");
+      const ch = d.choix.map((x: Record<string, unknown>) => ({ piece_id: entier(x?.piece_id, "choix", 1), poids: entier(x?.poids ?? 1, "poids", 1) }));
+      if (new Set(ch.map((x) => x.piece_id)).size !== ch.length) erreur("Un même élément apparaît deux fois dans le choix.");
       return { au_choix: true as const, quantite: entier(d.quantite, "capacité", 1), choix: ch };
     }
-    return { au_choix: false as const, piece_id: entier(d?.piece_id, "pièce donnée", 1), quantite: entier(d?.quantite, "quantité donnée", 1) };
+    return { au_choix: false as const, piece_id: entier(d?.piece_id, "ce qu'elle donne", 1), quantite: entier(d?.quantite, "quantité donnée", 1) };
   });
   const sorties = donne.flatMap((d) => (d.au_choix ? d.choix.map((x) => x.piece_id) : [d.piece_id]));
-  if (new Set(sorties).size !== sorties.length) erreur("Une pièce apparaît deux fois dans « donne ».");
-  if (sorties.some((id) => utilise.some((u) => u.piece_id === id))) erreur("Une pièce ne peut pas être à la fois utilisée et donnée.");
+  if (new Set(sorties).size !== sorties.length) erreur("Un même élément apparaît deux fois dans « donne ».");
+  if (sorties.some((id) => utilise.some((u) => u.piece_id === id))) erreur("Un élément ne peut pas être à la fois utilisé et donné.");
   return { famille_id, nom, mode, temps_min, ordre, utilise, donne };
 }
 
@@ -149,8 +149,8 @@ recettes.post("/etapes/:id/faite", async (c) => {
   if (b.donne !== undefined) {
     if (!Array.isArray(b.donne)) erreur("« donne » doit être une liste.");
     for (const d of b.donne as Record<string, unknown>[]) {
-      const pid = entier(d?.piece_id, "pièce obtenue", 1);
-      if (declare.has(pid)) erreur("Une pièce obtenue apparaît deux fois.");
+      const pid = entier(d?.piece_id, "ce qui est obtenu", 1);
+      if (declare.has(pid)) erreur("Un même élément obtenu apparaît deux fois.");
       declare.set(pid, entier(d?.quantite, "quantité obtenue", 0));
     }
   }
@@ -177,15 +177,15 @@ recettes.post("/etapes/:id/faite", async (c) => {
         utilisee += q * x.poids;
         sorties.push({ piece_id: x.piece_id, quantite: q });
       }
-      if (utilisee === 0) erreur("Indiquez ce qui est sorti (quelles pièces, combien).");
-      if (utilisee > capacite) erreur(`Trop de pièces déclarées : la capacité est de ${capacite} part(s), vous en avez déclaré ${utilisee}.`);
+      if (utilisee === 0) erreur("Indiquez ce qui est sorti (quoi, combien).");
+      if (utilisee > capacite) erreur(`Trop déclaré : la capacité est de ${capacite} part(s), vous en avez déclaré ${utilisee}.`);
     }
   }
-  for (const pid of declare.keys()) if (!permises.has(pid)) erreur("Une pièce déclarée ne sort pas de cette étape.");
+  for (const pid of declare.keys()) if (!permises.has(pid)) erreur("Un élément déclaré ne sort pas de cette étape.");
 
   // Utilisations : vérifie le stock (après les comptages fournis).
   const pieces = await lirePieces(db, [...etape.utilise.map((u) => u.piece_id), ...comptages.map((l) => l.piece_id)]);
-  for (const l of comptages) if (pieces.get(l.piece_id)!.suivi !== "quantite") erreur("Cette pièce ne se compte pas.");
+  for (const l of comptages) if (pieces.get(l.piece_id)!.suivi !== "quantite") erreur("Cet élément ne se compte pas.");
   const compte = new Map(comptages.map((l) => [l.piece_id, l.compte]));
   const manque = etape.utilise
     .filter((u) => u.suivi === "quantite")

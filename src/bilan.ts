@@ -20,6 +20,15 @@ export type StatSalon = {
   noms_a_relier: number;
 };
 
+/** Article dont les ventes servent de thermomètre : réglage « article_thermometre », sinon l'article générique de la famille Tampons. */
+export async function articleThermometre(db: D1Database, pieces?: PieceStat[]) {
+  const r = await db.prepare("SELECT valeur FROM reglage WHERE cle = 'article_thermometre'").first<{ valeur: string }>();
+  if (r && Number(r.valeur)) return Number(r.valeur);
+  const liste = pieces ?? ((await db.prepare("SELECT p.id, p.nom, p.famille_id, f.nom AS famille, p.niveau, p.suivi, p.fin_de_serie FROM piece p JOIN famille f ON f.id = p.famille_id").all<PieceStat>()).results);
+  const generiques = liste.filter((p) => p.suivi === "generique");
+  return (generiques.find((p) => p.famille.toLowerCase().startsWith("tampon")) ?? generiques[0])?.id ?? null;
+}
+
 export async function statistiques(db: D1Database) {
   const finSql = "date(s.date_debut, '+' || (s.nb_jours - 1) || ' days')";
   const [salonsR, carte, especes, corrR, cpR, piecesR, malR] = await db.batch([
@@ -41,6 +50,9 @@ export async function statistiques(db: D1Database) {
     corr.set(c.cle, { ne_pas_suivre: !!c.ne_pas_suivre, equivalent_tampons: c.equivalent_tampons, pieces: [] });
   for (const p of cpR.results as { cle: string; piece_id: number; quantite: number }[]) corr.get(p.cle)?.pieces.push(p);
   const pieces = new Map((piecesR.results as PieceStat[]).map((p) => [p.id, p]));
+  const thermo = await articleThermometre(db, [...pieces.values()]);
+  // Tampons vendus par nom de caisse = quantité de l'article thermomètre (Tampon lot = × 4, Collection = × 20).
+  const tamponsPar = (c: Corr) => c.pieces.filter((p) => p.piece_id === thermo).reduce((t, p) => t + p.quantite, 0);
   const estArticle = (pid: number) => { const p = pieces.get(pid); return !!p && p.niveau === "a_vendre" && p.suivi === "quantite"; };
 
   const stats = new Map<number, StatSalon>();
@@ -54,7 +66,7 @@ export async function statistiques(db: D1Database) {
   const compter = (st: StatSalon, cle: string, q: number, mode: "carte" | "especes") => {
     const c = corr.get(cle);
     if (!c || c.ne_pas_suivre) return;
-    st.tampons[mode] += q * c.equivalent_tampons;
+    st.tampons[mode] += q * tamponsPar(c);
     for (const p of c.pieces) {
       if (!estArticle(p.piece_id)) continue;
       const v = st.vendus.get(p.piece_id) ?? st.vendus.set(p.piece_id, { carte: 0, especes: 0 }).get(p.piece_id)!;
@@ -84,7 +96,7 @@ export async function statistiques(db: D1Database) {
     st.tampons.pour_1000 = st.salon.frequentation ? Math.round((st.tampons.total / st.salon.frequentation) * 10000) / 10 : null;
     st.noms_a_relier = aRelier.get(st.salon.id)?.size ?? 0;
   }
-  return { stats, pieces, corr };
+  return { stats, pieces, corr, tamponsPar, thermo };
 }
 
 const arrondi1 = (x: number) => Math.round(x * 10) / 10;
@@ -177,7 +189,7 @@ export async function recommander(db: D1Database, cibles: Salon[]) {
 bilan.get("/salons/:id/bilan", async (c) => {
   const id = entier(c.req.param("id"), "id", 1);
   const db = c.env.DB;
-  const { stats, pieces, corr } = await statistiques(db);
+  const { stats, pieces, corr, tamponsPar } = await statistiques(db);
   const st = stats.get(id);
   if (!st) erreur("Salon introuvable.", 404);
   const { results: esp } = await db.prepare("SELECT cle, quantite FROM vente_especes WHERE salon_id = ?").bind(id).all<{ cle: string; quantite: number }>();
@@ -194,7 +206,7 @@ bilan.get("/salons/:id/bilan", async (c) => {
   return c.json({
     salon: st.salon, jours: st.jours, carte_suivi: st.carte_suivi, especes_montant: st.especes_montant,
     tampons: st.tampons, noms_a_relier: st.noms_a_relier, articles,
-    caisse: noms.map((n) => ({ ...n, especes: especes.get(n.cle) ?? 0, tampons: corr.get(n.cle)?.equivalent_tampons ?? 0 })),
+    caisse: noms.map((n) => ({ ...n, especes: especes.get(n.cle) ?? 0, tampons: corr.get(n.cle) ? tamponsPar(corr.get(n.cle)!) : 0 })),
   });
 });
 

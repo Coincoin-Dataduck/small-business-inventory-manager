@@ -1,6 +1,6 @@
 // Interface ordinateur. Aucun framework : petites fonctions qui construisent le DOM.
 
-const NIVEAUX = { a_vendre: "À vendre", fait_maison: "Fait maison", achete: "Acheté", recup: "Récup" };
+const NIVEAUX = { a_vendre: "À vendre", fait_maison: "Fourniture maison", achete: "Fourniture achetée", recup: "Récup" };
 const SUIVIS = {
   quantite: "Compté à la pièce",
   sans_quantite: "Sans quantité (ex. peinture)",
@@ -137,7 +137,7 @@ function dessinerStock() {
   if (!etat.stock.length) {
     page.replaceChildren(
       h("div", { class: "carte" }, h("div", { class: "vide" }, "Aucune famille pour l'instant. Commencez par ",
-        h("a", { href: "#reglages" }, "Réglages"), " pour créer les familles et les pièces.")),
+        h("a", { href: "#reglages" }, "Réglages"), " pour créer les familles, les articles et les fournitures.")),
     );
     return;
   }
@@ -155,8 +155,8 @@ function dessinerStock() {
 
   const legende = h("div", { class: "legende" },
     h("span", {}, h("span", { class: "badge badge-a_vendre" }, "À vendre"), " prêt pour le stand"),
-    h("span", {}, h("span", { class: "badge badge-fait_maison" }, "Fait maison"), " préparé d'avance, en réserve"),
-    h("span", {}, h("span", { class: "badge badge-achete" }, "Acheté"), " fourniture"),
+    h("span", {}, h("span", { class: "badge badge-fait_maison" }, "Fourniture maison"), " préparée d'avance, en réserve"),
+    h("span", {}, h("span", { class: "badge badge-achete" }, "Fourniture achetée"), " ou récup"),
   );
 
   const cartes = piecesVisibles().map((f) =>
@@ -164,7 +164,7 @@ function dessinerStock() {
       h("h2", {}, f.nom),
       f.pieces.length
         ? h("table", { class: "tbl" }, h("tbody", {}, f.pieces.map(ligneStock)))
-        : h("div", { class: "vide" }, "Aucune pièce dans cette famille."),
+        : h("div", { class: "vide" }, "Rien dans cette famille pour l'instant."),
     ),
   );
 
@@ -264,7 +264,7 @@ function barreComptage() {
 
 function texteEcarts() {
   const n = lignesSaisies().length, e = nbEcarts();
-  return `${n} pièce(s) comptée(s) · ${e} écart(s) · les cases vides ne sont pas comptées`;
+  return `${n} ligne(s) comptée(s) · ${e} écart(s) · les cases vides ne sont pas comptées`;
 }
 
 function majBarreComptage() {
@@ -294,9 +294,9 @@ async function sauverComptage() {
   await pageStock();
 }
 
-// ───────────── Réglages : familles et pièces ─────────────
+// ───────────── Réglages : familles, articles et fournitures ─────────────
 async function pageReglages() {
-  [etat.familles, etat.stock, etat.etapes, etat.correspondances] = await Promise.all([api("/familles"), api("/stock"), api("/etapes"), api("/correspondances")]);
+  [etat.familles, etat.stock, etat.etapes, etat.correspondances, etat.reglages] = await Promise.all([api("/familles"), api("/stock"), api("/etapes"), api("/correspondances"), api("/reglages")]);
   dessinerReglages();
 }
 
@@ -346,7 +346,7 @@ function dessinerReglages() {
       class: "formulaire",
       onsubmit: (e) => { e.preventDefault(); tenter(async () => {
         await api("/pieces", { method: "POST", body: { nom: nom.value, famille_id: Number(fam.value), niveau: niv.value, suivi: sui.value } });
-        flash("Pièce ajoutée. Son stock part de 0 : comptez-la depuis l'écran Stock.");
+        flash("Ajouté. Son stock part de 0 : comptez-le depuis l'écran Stock.");
         await pageReglages();
       }); },
     },
@@ -359,17 +359,34 @@ function dessinerReglages() {
 
     const toutes = etat.stock.flatMap((f) => f.pieces.map((p) => ({ ...p, famille: f.nom })));
     pieces = h("section", { class: "carte" },
-      h("h2", {}, "Pièces et articles"),
+      h("h2", {}, "Articles et fournitures"),
       toutes.length
         ? h("table", { class: "tbl" },
             h("thead", {}, h("tr", {}, ["Nom", "Famille", "Type", "Suivi", ""].map((t) => h("th", {}, t)))),
             h("tbody", {}, toutes.flatMap((p) => [lignePieceReglage(p), etat.achatEdition?.id === p.id ? editeurAchat(p) : null])))
-        : h("div", { class: "vide" }, "Aucune pièce."),
+        : h("div", { class: "vide" }, "Rien pour l'instant."),
       formPiece,
     );
   }
 
-  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, familles, pieces, ...sectionsRecettes(), sectionCorrespondances()));
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, sectionThermometre(), familles, pieces, ...sectionsRecettes(), sectionCorrespondances()));
+}
+
+// Article thermomètre : ses ventes mesurent le passage devant le stand (Tampon lot = × 4, Collection = × 20).
+function sectionThermometre() {
+  const r = etat.reglages ?? {};
+  const effectif = r.article_thermometre_effectif ?? null;
+  return h("section", { class: "carte" },
+    h("h2", {}, "Thermomètre des salons"),
+    h("div", { class: "formulaire" },
+      h("label", {}, "Article dont les ventes mesurent le passage",
+        selectPiece(effectif, (v) => tenter(async () => {
+          await api("/reglages", { method: "PUT", body: { cle: "article_thermometre", valeur: v || null } });
+          flash("Thermomètre enregistré.");
+          await pageReglages();
+        }), "Article thermomètre", "articles")),
+      h("p", { class: "note", style: "margin:0;max-width:520px;font-size:13px" },
+        "C'est l'article « tampon sans motif » vendu à la caisse. Reliez « Tampon lot » à cet article × 4 et « Collection » × 20 : le nombre de tampons vendus en découle.")));
 }
 
 function lignePieceReglage(p) {
@@ -416,13 +433,16 @@ function nomPiece(id) {
   return toutesPieces().find((p) => p.id === id)?.nom ?? "?";
 }
 
-function selectPiece(valeur, onchange, label) {
+// filtre : "articles" (à vendre), "fournitures" (le reste) ou rien (tout).
+function selectPiece(valeur, onchange, label, filtre) {
+  const garde = (p) => !filtre || (filtre === "articles" ? p.niveau === "a_vendre" : p.niveau !== "a_vendre");
   return h("select", { "aria-label": label, onchange: (e) => onchange(Number(e.target.value)) },
     h("option", { value: "", selected: !valeur }, "— choisir —"),
-    etat.stock.map((f) => h("optgroup", { label: f.nom },
-      f.pieces.map((p) => h("option", { value: String(p.id), selected: p.id === valeur }, `${p.nom} (${NIVEAUX[p.niveau]})`)))),
+    etat.stock.filter((f) => f.pieces.some(garde)).map((f) => h("optgroup", { label: f.nom },
+      f.pieces.filter(garde).map((p) => h("option", { value: String(p.id), selected: p.id === valeur }, filtre ? p.nom : `${p.nom} (${NIVEAUX[p.niveau]})`)))),
   );
 }
+const estFourniture = (id) => { const p = toutesPieces().find((x) => x.id === id); return !!p && p.niveau !== "a_vendre"; };
 
 function resumeEtape(e) {
   const util = e.utilise.length ? e.utilise.map((u) => `${u.quantite} ${u.nom}`).join(" + ") : "rien";
@@ -482,10 +502,10 @@ function editeurEtape(ed) {
 
   const utilise = h("div", { class: "bloc-editeur" },
     h("strong", {}, "Utilise"),
-    ed.utilise.length ? null : h("div", { class: "note" }, "Rien (ex. une étape qui ne consomme aucune pièce suivie)."),
+    ed.utilise.length ? null : h("div", { class: "note" }, "Rien (ex. une étape qui ne consomme aucune fourniture suivie)."),
     ed.utilise.map((u, i) => h("div", { class: "ligne-editeur" },
-      selectPiece(u.piece_id, (v) => { u.piece_id = v; }, "Pièce utilisée"), ligneQte(u, "quantite", "Quantité utilisée"), retirer(ed.utilise, i))),
-    h("button", { type: "button", class: "btn-petit", onclick: () => { ed.utilise.push({ piece_id: null, quantite: 1 }); redessiner(); } }, "+ pièce utilisée"),
+      selectPiece(u.piece_id, (v) => { u.piece_id = v; }, "Ce qu'elle utilise"), ligneQte(u, "quantite", "Quantité utilisée"), retirer(ed.utilise, i))),
+    h("button", { type: "button", class: "btn-petit", onclick: () => { ed.utilise.push({ piece_id: null, quantite: 1 }); redessiner(); } }, "+ ce qu'elle utilise"),
   );
 
   const donne = h("div", { class: "bloc-editeur" },
@@ -495,13 +515,13 @@ function editeurEtape(ed) {
           h("div", { class: "ligne-editeur" },
             h("span", {}, "Au choix, capacité"), ligneQte(d, "quantite", "Capacité (parts)"), h("span", { class: "note" }, "part(s)"), retirer(ed.donne, i)),
           d.choix.map((c, j) => h("div", { class: "ligne-editeur" },
-            selectPiece(c.piece_id, (v) => { c.piece_id = v; }, "Pièce au choix"),
+            selectPiece(c.piece_id, (v) => { c.piece_id = v; }, "Au choix"),
             ligneQte(c, "poids", "Parts prises"), h("span", { class: "note" }, "part(s)"), retirer(d.choix, j))),
-          h("button", { type: "button", class: "btn-petit", onclick: () => { d.choix.push({ piece_id: null, poids: 1 }); redessiner(); } }, "+ pièce au choix"))
+          h("button", { type: "button", class: "btn-petit", onclick: () => { d.choix.push({ piece_id: null, poids: 1 }); redessiner(); } }, "+ une possibilité"))
       : h("div", { class: "ligne-editeur" },
-          selectPiece(d.piece_id, (v) => { d.piece_id = v; }, "Pièce donnée"), ligneQte(d, "quantite", "Quantité donnée"), retirer(ed.donne, i))),
+          selectPiece(d.piece_id, (v) => { d.piece_id = v; }, "Ce qu'elle donne"), ligneQte(d, "quantite", "Quantité donnée"), retirer(ed.donne, i))),
     h("div", { class: "ligne-editeur" },
-      h("button", { type: "button", class: "btn-petit", onclick: () => { ed.donne.push({ au_choix: false, piece_id: null, quantite: 1 }); redessiner(); } }, "+ pièce donnée"),
+      h("button", { type: "button", class: "btn-petit", onclick: () => { ed.donne.push({ au_choix: false, piece_id: null, quantite: 1 }); redessiner(); } }, "+ ce qu'elle donne"),
       h("button", { type: "button", class: "btn-petit", onclick: () => { ed.donne.push({ au_choix: true, quantite: 4, choix: [{ piece_id: null, poids: 1 }, { piece_id: null, poids: 1 }] }); redessiner(); } }, "+ sortie au choix (ex. prints)")),
   );
 
@@ -519,7 +539,7 @@ function editeurEtape(ed) {
         : { piece_id: d.piece_id, quantite: Number(d.quantite) }),
     };
     if ([...corps.utilise, ...corps.donne.filter((d) => !d.au_choix), ...corps.donne.flatMap((d) => d.choix ?? [])].some((x) => !x.piece_id))
-      throw new Error("Choisissez une pièce sur chaque ligne (ou retirez la ligne).");
+      throw new Error("Choisissez sur chaque ligne (ou retirez la ligne).");
     await api(ed.id ? "/etapes/" + ed.id : "/etapes", { method: ed.id ? "PUT" : "POST", body: corps });
     etat.editeur = null;
     flash(ed.id ? "Étape modifiée. Ce qui a déjà été fait reste tel quel dans l'historique." : "Étape ajoutée.");
@@ -533,7 +553,7 @@ function editeurEtape(ed) {
       h("label", { for: "ed-temps" }, ed.mode === "par_matiere" ? "Temps par matière entière (min)" : "Temps par pièce (min)", temps)),
     h("p", { class: "note", style: "margin:0;font-size:13px" }, ed.mode === "par_matiere"
       ? "Quantités pour UNE matière entière (une plaque, une feuille). Le rendement indiqué est une valeur de départ : la quantité réellement obtenue se déclare à « C'est fait »."
-      : "Quantités pour UNE pièce faite."),
+      : "Quantités pour UNE unité faite."),
     utilise, donne,
     h("div", { class: "barre-comptage" },
       h("button", { class: "btn-sec", onclick: () => { etat.editeur = null; dessinerReglages(); } }, "Annuler"),
@@ -585,7 +605,7 @@ function dessinerAtelier() {
         h("a", { href: "#objectifs/" + plan.preparation.id }, "Fixer les objectifs"), ".")));
     } else {
       blocs.push(h("p", { class: "note", style: "margin:0" },
-        "Pour chaque article, l'outil part de ce qui est déjà fait maison et ne propose de refaire une étape que si la réserve ne suffit pas. Les étapes sont numérotées dans l'ordre où les faire."));
+        "Pour chaque article, l'outil part de ce qui est déjà en fourniture maison et ne propose de refaire une étape que si la réserve ne suffit pas. Les étapes sont numérotées dans l'ordre où les faire."));
       blocs.push(...aFaire.map(carteArticle));
       if (prets.length) blocs.push(h("div", { class: "note" }, h("strong", {}, "Déjà prêt : "), prets.map((a) => `${a.nom} (${a.prets}/${a.a_avoir})`).join(", ")));
       if (plan.a_acheter.length) blocs.push(h("section", { class: "carte" }, h("h2", {}, "Il manque des fournitures"),
@@ -607,7 +627,7 @@ function dessinerAtelier() {
       h("td", {}, new Date(x.date).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })),
       h("td", { style: "font-weight:600" }, x.nom), h("td", { class: "num" }, "× " + x.fois),
       h("td", { class: "col-action" }, h("div", { class: "actions-ligne" }, h("button", { class: "btn-petit", onclick: () => tenter(async () => {
-        if (!confirm(`Annuler la saisie « ${x.nom} × ${x.fois} » ? Les pièces utilisées reviennent en stock, les pièces obtenues sont retirées.`)) return;
+        if (!confirm(`Annuler la saisie « ${x.nom} × ${x.fois} » ? Ce qui a été utilisé revient en stock, ce qui a été obtenu est retiré.`)) return;
         await api("/etapes-faites/" + x.id, { method: "DELETE" });
         flash("Saisie annulée.");
         await pageAtelier();
@@ -625,7 +645,7 @@ function carteArticle(a) {
     h("div", { class: "tete-article" },
       h("div", {}, h("h2", { style: "padding:0" }, a.nom), h("div", { class: "note" }, `objectif ${a.a_avoir}${split ? ` (${split} + marge)` : ""} · ${a.prets} prêt${a.prets > 1 ? "s" : ""}`)),
       h("div", { class: "manque" }, "il en manque ", h("strong", {}, a.manque))),
-    reserve.length ? h("div", { class: "note", style: "padding:0 14px 6px" }, "Partira en réserve (fait maison) : " + reserve.join(", ")) : null,
+    reserve.length ? h("div", { class: "note", style: "padding:0 14px 6px" }, "Partira en réserve (fourniture maison) : " + reserve.join(", ")) : null,
     travaux.length
       ? h("div", { class: "liste-etapes" }, travaux.map((t) => etapePlan(t, a)))
       : h("div", { class: "vide" }, "Aucune étape ne fabrique cet article : décrivez-la dans Réglages."));
@@ -981,7 +1001,7 @@ function dessinerObjectifs() {
 const ORDRE_QUESTIONS = { vente_impossible: 0, remboursement: 1, etape_depasse_stock: 2, nom_inconnu: 3, especes_a_saisir: 4 };
 
 async function compterQuestions() {
-  try { etat.nbQuestions = (await api("/questions")).length; } catch { etat.nbQuestions = null; }
+  try { etat.nbQuestions = (await api("/questions/nombre")).n; } catch { etat.nbQuestions = null; }
   dessinerMenu();
 }
 
@@ -1080,7 +1100,7 @@ function carteGroupeNom(groupe) {
   const variantes = groupe.length > 1 || groupe[0].detail.description
     ? h("div", { class: "bloc-editeur" },
         h("div", { class: "note" }, n
-          ? `Couleur${n > 1 ? "s" : ""} vue${n > 1 ? "s" : ""} à la caisse (non suivie${n > 1 ? "s" : ""}) : pensez à ajouter ${n > 1 ? n + " encreurs" : "l'encreur"} dans les pièces retirées.`
+          ? `Couleur${n > 1 ? "s" : ""} vue${n > 1 ? "s" : ""} à la caisse (non suivie${n > 1 ? "s" : ""}) : ajoutez l'article Encreur × ${n} dans la réponse.`
           : "Option vue à la caisse :"),
         groupe.map((q) => h("label", { class: "ligne-editeur" },
           groupe.length > 1 ? h("input", { type: "checkbox", checked: b.choisies.has(q.id), onchange: (e) => { e.target.checked ? b.choisies.add(q.id) : b.choisies.delete(q.id); } }) : null,
@@ -1098,18 +1118,15 @@ function carteGroupeNom(groupe) {
       groupe.length === 1 && !groupe[0].detail.description
         ? h("div", { class: "note" }, `${vendus} vendu(s) ${periode(groupe[0].detail)}${groupe[0].detail.prix ? ` · ${groupe[0].detail.prix} €` : ""}.`) : null,
       variantes,
-      h("div", {}, "Quel article est-ce ? Une vente retirera ces pièces du stock :"),
-      lignesPieces(b.lignes, "Pièce retirée du stock"),
+      h("div", {}, "Quel article est-ce ? Chaque vente le retirera du stock :"),
+      lignesPieces(b.lignes, "Article vendu"),
       creationRapide(b, n ? groupe[0].detail.nom : [groupe[0].detail.nom, groupe[0].detail.description].filter(Boolean).join(" ")),
-      h("label", { class: "ligne-editeur" }, "Compte pour",
-        h("input", { type: "number", min: "0", step: "1", class: "compte", value: b.tampons, oninput: (e) => { b.tampons = e.target.value; } }),
-        h("span", { class: "note" }, "tampon(s) dans le contrôle des tampons (0 si ce n'est pas un tampon ; lot = 4, collection = 20)")),
       h("div", { class: "barre-comptage" },
         h("button", { class: "btn-sec", onclick: () => repondre({ ne_pas_suivre: true }, (r) => `${r.noms} nom(s) marqué(s) « Ne pas suivre ».`) }, "Ne pas suivre"),
         h("button", { class: "btn", onclick: () => {
-          if (b.lignes.some((l) => !l.piece_id)) return flash("Choisissez une pièce sur chaque ligne.", true);
-          repondre({ pieces: b.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })), equivalent_tampons: Number(b.tampons || 0) },
-            (r) => `Enregistré pour ${r.noms} nom(s). ${r.ventes_appliquees} vente(s) retirée(s) du stock ; les ventes antérieures au début du suivi d'une pièce ne servent qu'aux statistiques.`);
+          if (b.lignes.some((l) => !l.piece_id)) return flash("Choisissez un article sur chaque ligne.", true);
+          repondre({ pieces: b.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })), equivalent_tampons: 0 },
+            (r) => `Enregistré pour ${r.noms} nom(s). ${r.ventes_appliquees} vente(s) retirée(s) du stock ; les ventes antérieures au début du suivi d'un article ne servent qu'aux statistiques.`);
         } }, "Enregistrer"))));
 }
 
@@ -1148,14 +1165,22 @@ function creationRapide(b, nomPropose) {
       h("button", { type: "button", class: "btn-sec", onclick: () => { b.creation = null; dessinerQuestions(); } }, "Annuler")));
 }
 
-function lignesPieces(etatLignes, label) {
+function lignesReponse(etatLignes, label, redessiner) {
+  const ligne = (l, i) => h("div", { class: "ligne-editeur" },
+    l.fourniture ? h("span", { class: "note" }, "fourniture") : null,
+    selectPiece(l.piece_id, (v) => { l.piece_id = v; }, l.fourniture ? "Fourniture utilisée à la vente" : label, l.fourniture ? "fournitures" : "articles"),
+    h("span", { class: "note" }, "×"),
+    h("input", { type: "number", min: "1", step: "1", class: "compte", value: String(l.quantite), "aria-label": "Quantité", oninput: (e) => { l.quantite = e.target.value; } }),
+    etatLignes.length > 1 ? h("button", { type: "button", class: "btn-petit", onclick: () => { etatLignes.splice(i, 1); redessiner(); } }, "Retirer") : null);
   return h("div", { class: "bloc-editeur" },
-    etatLignes.map((l, i) => h("div", { class: "ligne-editeur" },
-      selectPiece(l.piece_id, (v) => { l.piece_id = v; }, label),
-      h("span", { class: "note" }, "×"),
-      h("input", { type: "number", min: "1", step: "1", class: "compte", value: String(l.quantite), "aria-label": "Quantité", oninput: (e) => { l.quantite = e.target.value; } }),
-      etatLignes.length > 1 ? h("button", { type: "button", class: "btn-petit", onclick: () => { etatLignes.splice(i, 1); dessinerQuestions(); } }, "Retirer") : null)),
-    h("button", { type: "button", class: "btn-petit", onclick: () => { etatLignes.push({ piece_id: null, quantite: 1 }); dessinerQuestions(); } }, "+ une autre pièce"));
+    etatLignes.map(ligne),
+    h("div", { class: "ligne-editeur" },
+      h("button", { type: "button", class: "btn-petit", onclick: () => { etatLignes.push({ piece_id: null, quantite: 1 }); redessiner(); } }, "+ un autre article"),
+      h("button", { type: "button", class: "btn-petit", onclick: () => { etatLignes.push({ piece_id: null, quantite: 1, fourniture: true }); redessiner(); } }, "+ une fourniture utilisée à la vente (emballage…)")));
+}
+
+function lignesPieces(etatLignes, label) {
+  return lignesReponse(etatLignes, label, dessinerQuestions);
 }
 
 const brouillons = new Map(); // id question → saisie en cours (survit au redessin)
@@ -1196,17 +1221,14 @@ function carteQuestion(q) {
       h("h2", {}, `SumUp vend « ${nom} »`),
       h("div", { class: "editeur", style: "border-top:0" },
         h("div", { class: "note" }, `${d.quantite ?? 0} vendu(s) en ${d.ventes ?? 0} vente(s) ${periode}${d.prix ? ` · ${d.prix} €` : ""}. Quel article est-ce ? Une vente retirera ces pièces du stock.`),
-        lignesPieces(b.lignes, "Pièce retirée du stock"),
-        h("label", { class: "ligne-editeur" }, "Compte pour",
-          h("input", { type: "number", min: "0", step: "1", class: "compte", value: b.tampons, oninput: (e) => { b.tampons = e.target.value; } }),
-          h("span", { class: "note" }, "tampon(s) dans le contrôle des tampons (0 si ce n'est pas un tampon ; lot = 4, collection = 20)")),
+        lignesPieces(b.lignes, "Article vendu"),
         h("div", { class: "note", style: "font-size:13px" }, "Article absent de la liste ? Créez-le d'abord dans ", h("a", { href: "#reglages" }, "Réglages"), "."),
         h("div", { class: "barre-comptage" },
           h("button", { class: "btn-sec", onclick: () => repondre({ ne_pas_suivre: true }, () => "Noté : ce nom ne sera pas suivi.") }, "Ne pas suivre"),
           h("button", { class: "btn", onclick: () => {
-            if (b.lignes.some((l) => !l.piece_id)) return flash("Choisissez une pièce sur chaque ligne.", true);
-            repondre({ pieces: b.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })), equivalent_tampons: Number(b.tampons || 0) },
-              (r) => `Enregistré. ${r.ventes_appliquees} vente(s) récente(s) retirée(s) du stock (les ventes antérieures au début du suivi d'une pièce ne comptent que pour les statistiques).`);
+            if (b.lignes.some((l) => !l.piece_id)) return flash("Choisissez un article sur chaque ligne.", true);
+            repondre({ pieces: b.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })), equivalent_tampons: 0 },
+              (r) => `Enregistré. ${r.ventes_appliquees} vente(s) récente(s) retirée(s) du stock (les ventes antérieures au début du suivi d'un article ne comptent que pour les statistiques).`);
           } }, "Enregistrer"))));
   }
 
@@ -1217,11 +1239,11 @@ function carteQuestion(q) {
       h("h2", {}, `Remboursement de ${d.montant ?? "?"} € ${quand ? "(" + quand + ")" : ""}`),
       h("div", { class: "editeur", style: "border-top:0" },
         h("div", { class: "note" }, "L'article est-il revenu en stock ?" + (d.type ? ` (opération SumUp : ${d.type})` : "")),
-        lignesPieces(b.lignes, "Pièce revenue en stock"),
+        lignesPieces(b.lignes, "Article revenu en stock"),
         h("div", { class: "barre-comptage" },
           h("button", { class: "btn-sec", onclick: () => repondre({ rien: true }, () => "Noté.") }, "Rien n'est revenu"),
           h("button", { class: "btn", onclick: () => {
-            if (b.lignes.some((l) => !l.piece_id)) return flash("Choisissez une pièce sur chaque ligne.", true);
+            if (b.lignes.some((l) => !l.piece_id)) return flash("Choisissez un article sur chaque ligne.", true);
             repondre({ pieces: b.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })) }, () => "Remis en stock.");
           } }, "Remettre en stock"))));
   }
@@ -1237,38 +1259,30 @@ function sectionCorrespondances() {
     h("h2", {}, "Noms SumUp"),
     h("p", { class: "note", style: "margin:0;padding:0 14px 8px;font-size:13px" }, "Ce que chaque nom de la caisse retire du stock. Modifier une ligne réapplique toutes ses ventes."),
     h("table", { class: "tbl" },
-      h("thead", {}, h("tr", {}, ["Nom à la caisse", "Retire du stock", "Tampons", "Vendus", ""].map((t, i) => h("th", { class: i >= 2 && i <= 3 ? "num" : null }, t)))),
+      h("thead", {}, h("tr", {}, ["Nom à la caisse", "Retire du stock", "Vendus", ""].map((t, i) => h("th", { class: i === 2 ? "num" : null }, t)))),
       h("tbody", {}, liste.map((c) => ed && ed.cle === c.cle
-        ? h("tr", {}, h("td", { colspan: "5" }, h("div", { class: "editeur", style: "border-top:0" },
+        ? h("tr", {}, h("td", { colspan: "4" }, h("div", { class: "editeur", style: "border-top:0" },
             h("strong", {}, c.nom_affiche),
             lignesPiecesReglages(ed.lignes),
-            h("label", { class: "ligne-editeur" }, "Compte pour",
-              h("input", { type: "number", min: "0", step: "1", class: "compte", value: ed.tampons, oninput: (e) => { ed.tampons = e.target.value; } }), "tampon(s)"),
             h("div", { class: "barre-comptage" },
               h("button", { class: "btn-sec", onclick: () => { etat.corrEdition = null; dessinerReglages(); } }, "Annuler"),
               h("button", { class: "btn-sec", onclick: () => sauverCorrespondance({ cle: c.cle, ne_pas_suivre: true }) }, "Ne pas suivre"),
               h("button", { class: "btn", onclick: () => {
-                if (ed.lignes.some((l) => !l.piece_id)) return flash("Choisissez une pièce sur chaque ligne.", true);
-                sauverCorrespondance({ cle: c.cle, pieces: ed.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })), equivalent_tampons: Number(ed.tampons || 0) });
+                if (ed.lignes.some((l) => !l.piece_id)) return flash("Choisissez un article sur chaque ligne.", true);
+                sauverCorrespondance({ cle: c.cle, pieces: ed.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })), equivalent_tampons: 0 });
               } }, "Enregistrer")))))
         : h("tr", {},
             h("td", { style: "font-weight:600" }, c.nom_affiche),
             h("td", {}, c.ne_pas_suivre ? h("span", { class: "note" }, "non suivi") : c.pieces.map((p) => `${p.quantite > 1 ? p.quantite + " × " : ""}${p.nom}`).join(" + ")),
-            h("td", { class: "num" }, c.equivalent_tampons || ""),
             h("td", { class: "num" }, c.vendus),
             h("td", {}, h("div", { class: "actions-ligne" }, h("button", { class: "btn-petit", disabled: !!ed, onclick: () => {
-              etat.corrEdition = { cle: c.cle, tampons: String(c.equivalent_tampons), lignes: c.pieces.length ? c.pieces.map((p) => ({ piece_id: p.piece_id, quantite: p.quantite })) : [{ piece_id: null, quantite: 1 }] };
+              etat.corrEdition = { cle: c.cle, tampons: String(c.equivalent_tampons), lignes: c.pieces.length ? c.pieces.map((p) => ({ piece_id: p.piece_id, quantite: p.quantite, fourniture: estFourniture(p.piece_id) })) : [{ piece_id: null, quantite: 1 }] };
               dessinerReglages();
             } }, "Modifier"))))))));
 }
 
 function lignesPiecesReglages(lignes) {
-  return h("div", { class: "bloc-editeur" },
-    lignes.map((l, i) => h("div", { class: "ligne-editeur" },
-      selectPiece(l.piece_id, (v) => { l.piece_id = v; }, "Pièce"), h("span", { class: "note" }, "×"),
-      h("input", { type: "number", min: "1", step: "1", class: "compte", value: String(l.quantite), oninput: (e) => { l.quantite = e.target.value; } }),
-      lignes.length > 1 ? h("button", { type: "button", class: "btn-petit", onclick: () => { lignes.splice(i, 1); dessinerReglages(); } }, "Retirer") : null)),
-    h("button", { type: "button", class: "btn-petit", onclick: () => { lignes.push({ piece_id: null, quantite: 1 }); dessinerReglages(); } }, "+ une autre pièce"));
+  return lignesReponse(lignes, "Article", dessinerReglages);
 }
 
 function sauverCorrespondance(corps) {
@@ -1341,7 +1355,7 @@ function dessinerBilan() {
       h("td", { class: "num", style: "width:120px" }, h("input", { class: "compte", type: "number", min: "0", step: "1", value: e.q[c.cle] ?? "", placeholder: "0", "aria-label": "Vendus en espèces : " + c.nom,
         oninput: (ev) => { e.q[c.cle] = ev.target.value; } })))))),
     h("div", { class: "barre-comptage", style: "padding:14px" },
-      h("span", { class: "note" }, "Les quantités en espèces retirent les pièces du stock, comme les ventes carte."),
+      h("span", { class: "note" }, "Les quantités en espèces retirent les articles du stock, comme les ventes carte."),
       h("button", { class: "btn", onclick: () => tenter(async () => {
         const lignes = Object.entries(e.q).filter(([, v]) => v !== "" && Number(v) > 0).map(([cle, v]) => ({ cle, quantite: Number(v) }));
         if (lignes.some((l) => !Number.isInteger(l.quantite))) throw new Error("Les quantités doivent être des nombres entiers.");

@@ -16,7 +16,7 @@ La conception a été faite et validée en amont, dans une conversation sur clau
 - Quand un mécanisme est affirmé, montrer le calcul ou la chaîne causale, et le niveau de confiance des chiffres.
 - Contredire quand c'est justifié ; ne pas aller trop vite dans son sens.
 - Réponses en français, ton direct, sans remplissage. Ne jamais commenter le temps écoulé entre deux messages.
-- Interface pour non-initiés : vocabulaire terrain, choix par défaut assumés. Mots à l'écran : Prêt / à vendre, Fait maison, Acheté, Objectif, Préparation, Compter. Jamais : SKU, nomenclature, fournée, encours, réappro.
+- Interface pour non-initiés : vocabulaire terrain, choix par défaut assumés. Mots à l'écran : Article / à vendre, Fourniture maison (préparée d'avance), Fourniture achetée, Récup, Objectif, Préparation, Compter. Jamais : pièce (au sens d'élément de stock ; « à la pièce » = à l'unité reste correct), SKU, nomenclature, fournée, encours, réappro.
 - L'ordinateur est l'usage principal ; le téléphone est un sous-ensemble (À faire, Compter, Questions).
 
 ## Architecture retenue

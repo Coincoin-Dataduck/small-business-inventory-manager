@@ -7,32 +7,49 @@ export const questions = new Hono<{ Bindings: Env }>();
 
 type Q = { id: number; type: string; piece_id: number | null; detail: string; cree_le: string };
 
+const ESPECES_A_SAISIR = `SELECT s.id, s.nom, date(s.date_debut, '+' || (s.nb_jours - 1) || ' days') AS fin FROM salon s
+     WHERE date(s.date_debut, '+' || (s.nb_jours - 1) || ' days') < date('now')
+       AND date(s.date_debut, '+' || (s.nb_jours - 1) || ' days') >= date('now', '-30 days')
+       AND s.especes_montant IS NULL AND NOT EXISTS (SELECT 1 FROM vente_especes ve WHERE ve.salon_id = s.id)`;
+
+// Nombre de questions en attente (pastille du menu) : deux comptages, rien d'autre.
+questions.get("/questions/nombre", async (c) => {
+  const db = c.env.DB;
+  const [a, b] = await db.batch([
+    db.prepare("SELECT COUNT(*) AS n FROM question WHERE repondu_le IS NULL"),
+    db.prepare(`SELECT COUNT(*) AS n FROM (${ESPECES_A_SAISIR})`),
+  ]);
+  return c.json({ n: (a.results[0] as { n: number }).n + (b.results[0] as { n: number }).n });
+});
+
 questions.get("/questions", async (c) => {
   const db = c.env.DB;
-  const { results } = await db.prepare(
-    `SELECT q.id, q.type, q.piece_id, q.detail, q.cree_le, p.nom AS piece, ${STOCK_SQL} AS stock
-     FROM question q LEFT JOIN piece p ON p.id = q.piece_id
-     WHERE q.repondu_le IS NULL ORDER BY q.cree_le, q.id`,
-  ).all<Q & { piece: string | null; stock: number | null }>();
-  // Pour un nom inconnu : combien de ventes, quand.
+  // Tout en un seul aller-retour : questions, statistiques des noms inconnus, rappels d'espèces.
+  const [qR, statsR, aSaisirR] = await db.batch([
+    db.prepare(
+      `SELECT q.id, q.type, q.piece_id, q.detail, q.cree_le, p.nom AS piece, ${STOCK_SQL} AS stock
+       FROM question q LEFT JOIN piece p ON p.id = q.piece_id
+       WHERE q.repondu_le IS NULL ORDER BY q.cree_le, q.id`,
+    ),
+    db.prepare(
+      `SELECT vl.cle, COUNT(DISTINCT vl.vente_id) AS ventes, SUM(vl.quantite) AS quantite, MIN(v.jour) AS premier, MAX(v.jour) AS dernier, MAX(vl.prix) AS prix
+       FROM vente_ligne vl JOIN vente v ON v.id = vl.vente_id
+       WHERE vl.cle IN (SELECT json_extract(detail, '$.cle') FROM question WHERE type = 'nom_inconnu' AND repondu_le IS NULL)
+       GROUP BY vl.cle`,
+    ),
+    db.prepare(ESPECES_A_SAISIR),
+  ]);
+  const statsPar = new Map((statsR.results as { cle: string }[]).map((x) => [x.cle, x]));
   const sortie = [];
-  for (const q of results) {
+  for (const q of qR.results as (Q & { piece: string | null; stock: number | null })[]) {
     const detail = JSON.parse(q.detail);
     if (q.type === "nom_inconnu") {
-      const s = await db.prepare(
-        "SELECT COUNT(DISTINCT vl.vente_id) AS ventes, SUM(vl.quantite) AS quantite, MIN(v.jour) AS premier, MAX(v.jour) AS dernier, MAX(vl.prix) AS prix FROM vente_ligne vl JOIN vente v ON v.id = vl.vente_id WHERE vl.cle = ?",
-      ).bind(detail.cle).first();
-      Object.assign(detail, s);
+      const { cle: _c, ...st } = (statsPar.get(detail.cle) ?? {}) as Record<string, unknown>;
+      Object.assign(detail, st);
     }
     sortie.push({ ...q, detail });
   }
-  // Rappel : espèces à recopier pour les salons terminés depuis moins de 30 jours (sans saisie).
-  const { results: aSaisir } = await db.prepare(
-    `SELECT s.id, s.nom, date(s.date_debut, '+' || (s.nb_jours - 1) || ' days') AS fin FROM salon s
-     WHERE date(s.date_debut, '+' || (s.nb_jours - 1) || ' days') < date('now')
-       AND date(s.date_debut, '+' || (s.nb_jours - 1) || ' days') >= date('now', '-30 days')
-       AND s.especes_montant IS NULL AND NOT EXISTS (SELECT 1 FROM vente_especes ve WHERE ve.salon_id = s.id)`,
-  ).all<{ id: number; nom: string; fin: string }>();
+  const aSaisir = aSaisirR.results as { id: number; nom: string; fin: string }[];
   for (const s of aSaisir) sortie.push({ id: -s.id, type: "especes_a_saisir", piece_id: null, detail: { salon_id: s.id, nom: s.nom, fin: s.fin }, cree_le: s.fin });
   return c.json(sortie);
 });
@@ -41,9 +58,9 @@ type DefinitionCorrespondance = { ne_pas_suivre: boolean; pieces: { piece_id: nu
 
 function lireDefinition(b: Record<string, unknown>): DefinitionCorrespondance {
   if (b.ne_pas_suivre) return { ne_pas_suivre: true, pieces: [], equivalent_tampons: 0 };
-  if (!Array.isArray(b.pieces) || !b.pieces.length) erreur("Choisissez au moins une pièce, ou « Ne pas suivre ».");
-  const pieces = b.pieces.map((p: Record<string, unknown>) => ({ piece_id: entier(p?.piece_id, "pièce", 1), quantite: entier(p?.quantite ?? 1, "quantité", 1) }));
-  if (new Set(pieces.map((p) => p.piece_id)).size !== pieces.length) erreur("Une pièce apparaît deux fois.");
+  if (!Array.isArray(b.pieces) || !b.pieces.length) erreur("Choisissez au moins un article, ou « Ne pas suivre ».");
+  const pieces = b.pieces.map((p: Record<string, unknown>) => ({ piece_id: entier(p?.piece_id, "article", 1), quantite: entier(p?.quantite ?? 1, "quantité", 1) }));
+  if (new Set(pieces.map((p) => p.piece_id)).size !== pieces.length) erreur("Un même article apparaît deux fois.");
   const equivalent_tampons = b.equivalent_tampons === undefined || b.equivalent_tampons === "" ? 0 : entier(b.equivalent_tampons, "équivalent tampons", 0);
   return { ne_pas_suivre: false, pieces, equivalent_tampons };
 }
@@ -95,9 +112,9 @@ questions.post("/questions/:id/reponse", async (c) => {
   if (q.type === "remboursement") {
     if (b.rien) { await fermer({ rien: true }).run(); return c.json({ ok: true }); }
     if (!Array.isArray(b.pieces) || !b.pieces.length) erreur("Indiquez ce qui est revenu en stock, ou « Rien n'est revenu ».");
-    const pieces = b.pieces.map((p: Record<string, unknown>) => ({ piece_id: entier(p?.piece_id, "pièce", 1), quantite: entier(p?.quantite ?? 1, "quantité", 1) }));
+    const pieces = b.pieces.map((p: Record<string, unknown>) => ({ piece_id: entier(p?.piece_id, "article", 1), quantite: entier(p?.quantite ?? 1, "quantité", 1) }));
     const lues = await lirePieces(db, pieces.map((p) => p.piece_id));
-    if ([...lues.values()].some((p) => p.suivi !== "quantite")) erreur("Cette pièce n'a pas de stock.");
+    if ([...lues.values()].some((p) => p.suivi !== "quantite")) erreur("Cet article n'a pas de stock.");
     await db.batch([
       ...pieces.map((p) => db.prepare("INSERT INTO mouvement (piece_id, quantite, motif, source_type, source_id) VALUES (?, ?, 'remboursement', 'question', ?)").bind(p.piece_id, p.quantite, id)),
       fermer({ pieces }),
