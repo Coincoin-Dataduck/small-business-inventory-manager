@@ -35,6 +35,6 @@ La conception a été faite et validée en amont, dans une conversation sur clau
 4. Ne pas committer `sumup_test_resultat.json` s'il contient des données de vente (l'ajouter au `.gitignore`).
 
 ## Ensuite (ordre convenu)
-- **V1** (utilisable au prochain salon) : catalogue + recettes, stock à trois niveaux + Compter, import SumUp + question anti-oubli, Atelier (étapes à faire, « C'est fait »).
-- **V2** : À acheter, Salons (préparations, objectifs recommandés par les tampons, bilan, case « mal exposé »), cohérence tampons, temps de travail.
+- **Une seule version complète** (décision de Clément, 16/11/2026 : l'ex-V2 fait partie du minimum utile) : catalogue + recettes, stock à trois niveaux + Compter, import SumUp + questions, Atelier, À acheter, Salons (préparations, objectifs recommandés, bilan, « mal exposé »), cohérence tampons, temps de travail.
+- Structure des données : `docs/donnees.md`.
 - Les données de départ (inventaire, rendements, lots, délais) se saisissent **dans l'outil** une fois la V1 en ligne, pas avant.
