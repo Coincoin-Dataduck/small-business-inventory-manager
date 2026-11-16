@@ -18,6 +18,7 @@
 | Bouton « Pas maintenant » dans les achats | Remplacé par « J'en ai déjà » (= compter) et « Modifier » + date « à commander avant » | Une ligne repoussée réapparaît sans qu'on sache pourquoi. |
 | Encre d'imprimante, encre de linogravure | Hors suivi | EcoTank ; consommation non mesurable par pièce. |
 | Peinture | Pas de quantité ; liée à la couleur du modèle, bouton « pot presque vide » | Consommation trop petite et variable. |
-| Gachapon | Non suivi comme produit | Contient surtout des tampons, déjà captés par le comptage avant/après salon. |
-| Tampons à la caisse | Un seul article générique ; ventes par motif = comptage avant + fabriqué − comptage après | Les clients se servent ; saisir le motif à la caisse serait trop lourd. |
+| Gachapon | Non suivi comme produit | Contient surtout des tampons, captés par les comptages. |
+| Tampons à la caisse | Un seul article générique ; sorties par motif = écart entre deux comptages avant préparation, + fabriqué | Les clients se servent ; saisir le motif à la caisse serait trop lourd. |
+| Comptage au retour de salon | Supprimé (16/11/2026) | Trop lourd ; ventes = carte + espèces saisies. Prix : dons/pertes/vols invisibles jusqu'au comptage suivant, tampons par motif connus seulement par préparation. |
 | Saisie des données de départ avant le développement | Écartée | Elles se saisissent dans l'outil, sinon on saisit deux fois. |

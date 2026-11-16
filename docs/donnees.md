@@ -6,7 +6,7 @@ Rien de métier n'est codé en dur : tout ce qui suit est saisi et modifié dans
 ## Principe : un journal, pas un chiffre
 Le stock d'une pièce n'est pas stocké : c'est la **somme de ses mouvements** (vente, étape faite, comptage, réception d'achat, remboursement).
 Un comptage n'écrase rien : il ajoute la différence entre le compté et l'attendu, avec son motif.
-Pourquoi : le bilan d'un salon a besoin de « avant + fabriqué − après », et chaque chiffre doit pouvoir s'expliquer.
+Pourquoi : chaque chiffre doit pouvoir s'expliquer, et les sorties de tampons par motif se calculent entre deux comptages (« avant + fabriqué depuis − avant suivant »).
 
 Quantités toujours **entières**. Une fraction (« 1/45 de feuille de stickers ») devient une étape (« imprimer une feuille → 45 stickers »).
 
@@ -21,7 +21,7 @@ Quantités toujours **entières**. Une fraction (« 1/45 de feuille de stickers 
 
 **piece_lot** — tailles de lot possibles d'une pièce achetée (contreplaqué : 30 / 80 / 160). Une réception de taille inconnue y est ajoutée.
 
-**mouvement** — le journal : pièce, quantité (+/−), motif (`vente`, `etape`, `comptage`, `reception`, `remboursement`), date, lien vers la source (ligne de vente, étape faite, comptage, commande).
+**mouvement** — le journal : pièce, quantité (+/−), motif (`vente` (carte), `vente_especes`, `etape`, `comptage`, `reception`, `remboursement`), date, lien vers la source (ligne de vente, étape faite, comptage, commande).
 
 ## Recettes
 **etape** — rattachée à un article (créée depuis le gabarit de sa famille, modifiable ensuite) : nom, `par_matiere` ou `a_la_piece`, temps (par pièce ou par matière entière), ordre.
@@ -39,7 +39,7 @@ Quantités toujours **entières**. Une fraction (« 1/45 de feuille de stickers 
 **vente_ligne** — nom et description tels que SumUp les donne, quantité, prix.
 
 **correspondance** — clé = nom + description nettoyés (espaces, casse) → ce qu'une vente décompte :
-- une ou plusieurs pièces avec quantité (ex. « Tampon lot » → 1 emballage lot + 1 sticker rond, les tampons eux-mêmes étant rattrapés au comptage)
+- une ou plusieurs pièces avec quantité (ex. « Tampon lot » → 1 emballage lot + 1 sticker rond, les tampons par motif étant rattrapés aux comptages)
 - `equivalent_tampons` pour le contrôle de cohérence (unité 1, lot 4, collection 20)
 - ou « ne pas suivre »
 
@@ -54,10 +54,11 @@ Quantités toujours **entières**. Une fraction (« 1/45 de feuille de stickers 
 
 **objectif** — préparation, salon, article : tampons prévus, conseillé (calcul conservé pour l'affichage), retenu.
 
-**comptage** — date, type (`libre`, `avant`, `retour`), préparation / salon concerné.
+**comptage** — date, type (`libre`, `avant`), préparation / salon concerné.
 **comptage_ligne** — pièce, attendu, compté (→ mouvement de la différence).
 
-**bilan_article** — salon, article : « mal exposé ou épuisé » (exclut de la recommandation) ; ventes en espèces (facultatif, recopié de la table manuscrite, sert au contrôle carte + espèces ≈ écart compté).
+**bilan_article** — salon, article : « mal exposé ou épuisé » (exclut de la recommandation) ; 
+**vente_especes** — salon, article, quantité : recopié de la table manuscrite au bilan (→ mouvement `vente_especes`).
 
 ## Achats
 **commande** — pièce, quantité, taille de lot, date, `commande` → `recu` (→ mouvement de réception).

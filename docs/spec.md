@@ -19,10 +19,8 @@ Validée question par question avec Clément (novembre 2026). Les « ? » sont d
 ## 2. Ventes et corrections
 - Ventes importées automatiquement depuis **SumUp**. Ko-fi abandonné.
   - **V1 : caisse au stand uniquement.** La boutique en ligne n'est pas encore ouverte ; le format de ses commandes est inconnu (à vérifier par une commande test à l'ouverture).
-  - **Espèces : hors SumUp** (fonction payante non prise) ; notées sur une table manuscrite. Elles ne décrémentent donc pas le stock : c'est le **comptage au retour** de chaque salon qui recale « à vendre ». Ventes réelles d'un article sur un salon = avant + fabriqué − après ; SumUp ne donne que la part carte.
-  - Le comptage au retour porte sur **tout le stock** (validé) : ventes réelles de chaque article = avant + fabriqué − après.
-  - La table manuscrite des espèces donne les **quantités par article** (validé) → saisie **facultative** « ventes en espèces » au bilan. Elle ne change pas les ventes (déjà connues par le comptage) ; elle sert de **contrôle** : carte + espèces ≈ écart compté. Un écart restant = fabrication non notée, perte ou erreur de comptage.
-  - Le contrôle de cohérence des tampons doit afficher que l'écart SumUp / comptage **inclut les espèces** (ce n'est pas une anomalie).
+  - **Espèces : hors SumUp** (fonction payante non prise) ; notées sur une table manuscrite, **quantités par article**. Elles se **saisissent dans l'outil** après chaque salon (écran Bilan) : c'est ce qui les décompte du stock. Tant qu'elles ne sont pas saisies, une question le rappelle.
+  - **Pas de comptage au retour de salon** (décision de Clément, 16/11/2026, pour simplifier). Ventes d'un article sur un salon = carte (SumUp) + espèces (saisies). Dons, pertes et vols ne sont pas captés : ils restent dans le stock jusqu'au prochain comptage (le comptage avant la préparation suivante les recale).
 - Une vente (carte) décrémente le stock « à vendre ».
 - Seuls les paiements **réussis** (`SUCCESSFUL`) comptent : les paiements refusés arrivent aussi avec leurs articles.
 - **Correspondance SumUp ↔ article** : SumUp ne donne aucun identifiant d'article, seulement un nom et parfois une description (variante, ex. « Boucles d'oreilles » / « GRANDES » ; ailleurs la variante est dans le nom : « Mini-presse à fleurs - Sauge »). Clé = nom + description nettoyés (espaces, casse). Table de correspondance éditable ; « Tampon unité » et « Tampon lot » → article générique des tampons ; les articles en fin de série sont reliés aussi.
@@ -32,7 +30,7 @@ Validée question par question avec Clément (novembre 2026). Les « ? » sont d
   - par un comptage (global ou d'une famille) ;
   - par une **vente impossible** (SumUp vend un article à stock 0 → question anti-oubli : « vous en avez sûrement fabriqué sans le noter, combien en aviez-vous ? ») ;
   - par une étape qui utilise plus de pièces que le stock (« selon l'outil il ne restait que 3 attaches ; combien en aviez-vous vraiment ? »).
-- **Tampons** : un seul article générique à la caisse ; le suivi par motif se fait par comptage avant / après salon. Ventes d'un motif = avant + fabriqué − après. Vérification : unités + 4 × lots + 20 × collections + tampons des gachapons ≈ écart compté.
+- **Tampons** : un seul article générique à la caisse ; le total vendu est connu (unités + 4 × lots + 20 × collections, carte + espèces). Le suivi **par motif** ne vient que des comptages : sans comptage au retour, il se déduit au **comptage avant de la préparation suivante** : sorties d'un motif = comptage avant (N) + fabriqué depuis − comptage avant (N+1). Ce chiffre inclut dons, pertes, gachapon, et mélange les salons regroupés dans une même préparation. Vérification : total des sorties par motif ≈ tampons vendus (caisse) + gachapon. (Proposé, à valider.)
 - Nom inconnu vu dans SumUp → « quel article est-ce ? » (article existant, nouvel article d'une famille, ou « ne pas suivre ») ; la réponse est mémorisée dans la correspondance.
 
 ## 3. Salons et préparations
@@ -40,7 +38,7 @@ Validée question par question avec Clément (novembre 2026). Les « ? » sont d
 - Un salon = nom, type, dates, nombre de jours, fréquentation attendue.
 - Salons trop rapprochés pour refaire du stock entre eux (écart < seuil, 14 jours par défaut) sont **proposés** dans une même **préparation** ; Séparer / Regrouper à la main, retour possible à la proposition.
 - Objectif par article et par salon ; objectif de la préparation = somme ; marge (30 % par défaut) appliquée **une seule fois** par préparation.
-- Étapes d'une préparation : Objectifs → Comptage avant → Comptages au retour (un par salon) → Bilan (automatique).
+- Étapes d'une préparation : Objectifs → Comptage avant → Bilan (ventes carte automatiques + saisie des espèces par article).
 - **Recommandation** : voir `historique-salons.md` (tampons comme thermomètre, meilleur ratio passé, case « mal exposé ou épuisé » au bilan). L'outil recommande, Hervine/Clément fixent.
 
 ## 4. Achats
