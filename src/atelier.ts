@@ -148,10 +148,12 @@ export function planifier(pieces: Map<number, Piece>, etapes: Etape[], demandes:
   };
 }
 
-atelier.get("/atelier", async (c) => {
-  const db = c.env.DB;
+atelier.get("/atelier", async (c) => c.json(await planActuel(c.env.DB)));
+
+/** Plan de la préparation en cours (partagé par l'Atelier et À acheter). */
+export async function planActuel(db: D1Database) {
   const etat = await preparationsActuelles(db);
-  if (etat.en_cours === null) return c.json({ preparation: null });
+  if (etat.en_cours === null) return { preparation: null as null };
   const obj = await lireObjectifs(db, etat.en_cours);
 
   const [piecesRes, etapes] = await Promise.all([
@@ -185,12 +187,12 @@ atelier.get("/atelier", async (c) => {
     };
   });
   const sansTemps = travaux.filter((t) => t.temps_min === null).length;
-  return c.json({
+  return {
     preparation: obj.preparation, salons: obj.salons, articles, travaux,
     travail_min: travaux.reduce((s, t) => s + (t.temps_min ?? 0), 0), etapes_sans_temps: sansTemps,
     a_acheter: plan.a_acheter, problemes: plan.problemes,
-  });
-});
+  };
+}
 
 async function lireEtapesPourPlan(db: D1Database): Promise<Etape[]> {
   const [e, u, d, ch] = await db.batch([

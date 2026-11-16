@@ -9,7 +9,7 @@ const SUIVIS = {
 const PAGES = [
   { id: "stock", label: "Stock" },
   { id: "atelier", label: "Atelier" },
-  { id: "achats", label: "À acheter", bientot: true },
+  { id: "achats", label: "À acheter" },
   { id: "salons", label: "Salons" },
   { id: "questions", label: "Questions" },
   { id: "reglages", label: "Réglages" },
@@ -98,6 +98,7 @@ async function afficher() {
     if (etat.page === "atelier") await pageAtelier();
     if (etat.page === "salons") await pageSalons();
     if (etat.page === "questions") await pageQuestions();
+    if (etat.page === "achats") await pageAchats();
     if (etat.page === "objectifs") await pageObjectifs(Number(etat.params[0]));
     if (etat.page === "bilan") await pageBilan(Number(etat.params[0]));
   });
@@ -362,7 +363,7 @@ function dessinerReglages() {
       toutes.length
         ? h("table", { class: "tbl" },
             h("thead", {}, h("tr", {}, ["Nom", "Famille", "Type", "Suivi", ""].map((t) => h("th", {}, t)))),
-            h("tbody", {}, toutes.map(lignePieceReglage)))
+            h("tbody", {}, toutes.flatMap((p) => [lignePieceReglage(p), etat.achatEdition?.id === p.id ? editeurAchat(p) : null])))
         : h("div", { class: "vide" }, "Aucune pièce."),
       formPiece,
     );
@@ -396,6 +397,7 @@ function lignePieceReglage(p) {
     h("td", { class: "note" }, SUIVIS[p.suivi]),
     h("td", {}, h("div", { class: "actions-ligne" },
       h("button", { class: "btn-petit", onclick: () => { etat.edition = p.id; dessinerReglages(); } }, "Modifier"),
+      p.niveau === "achete" ? h("button", { class: "btn-petit", disabled: !!etat.achatEdition, onclick: () => tenter(() => ouvrirReglageAchat(p)) }, "Achat") : null,
       h("button", { class: "btn-petit", onclick: () => tenter(async () => {
         await api("/pieces/" + p.id, { method: "PATCH", body: { fin_de_serie: !p.fin_de_serie } });
         await pageReglages();
@@ -1019,7 +1021,7 @@ function dessinerQuestions() {
   // Noms inconnus : une carte par nom, ses variantes (options SumUp) dedans.
   const groupes = new Map();
   for (const q of etat.questions.filter((q) => q.type === "nom_inconnu")) {
-    const k = q.detail.nom.trim().toLowerCase();
+    const k = q.detail.nom.trim().toLowerCase() + "#" + nbCouleurs(q.detail.description);
     (groupes.get(k) ?? groupes.set(k, []).get(k)).push(q);
   }
   etat.selection ??= new Set();
@@ -1044,8 +1046,17 @@ function dessinerQuestions() {
       }) }, "Ne pas suivre la sélection")) : null));
 }
 
+// Une option « • vert » = un encreur vendu avec ; la couleur ne compte pas, seul leur nombre compte.
+function nbCouleurs(description) {
+  return description ? (description.match(/•/g) || []).length : 0;
+}
+function texteCouleurs(n) {
+  return n === 0 ? "" : n === 1 ? " + 1 couleur (encreur)" : ` + ${n} couleurs (encreurs)`;
+}
+
 function carteGroupeNom(groupe) {
-  const cle = "g:" + groupe[0].detail.nom.trim().toLowerCase();
+  const n = nbCouleurs(groupe[0].detail.description);
+  const cle = "g:" + groupe[0].detail.nom.trim().toLowerCase() + "#" + n;
   const b = brouillons.get(cle) ?? brouillons.set(cle, { lignes: [{ piece_id: null, quantite: 1 }], tampons: "0", choisies: new Set(groupe.map((q) => q.id)) }).get(cle);
   const ids = groupe.map((q) => q.id);
   const toutesSel = ids.every((id) => etat.selection.has(id));
@@ -1062,7 +1073,9 @@ function carteGroupeNom(groupe) {
   });
   const variantes = groupe.length > 1 || groupe[0].detail.description
     ? h("div", { class: "bloc-editeur" },
-        h("div", { class: "note" }, groupe.length > 1 ? "Variantes vues à la caisse : la réponse s'applique à celles qui sont cochées." : "Option vue à la caisse :"),
+        h("div", { class: "note" }, n
+          ? `Couleur${n > 1 ? "s" : ""} vue${n > 1 ? "s" : ""} à la caisse (non suivie${n > 1 ? "s" : ""}) : pensez à ajouter ${n > 1 ? n + " encreurs" : "l'encreur"} dans les pièces retirées.`
+          : "Option vue à la caisse :"),
         groupe.map((q) => h("label", { class: "ligne-editeur" },
           groupe.length > 1 ? h("input", { type: "checkbox", checked: b.choisies.has(q.id), onchange: (e) => { e.target.checked ? b.choisies.add(q.id) : b.choisies.delete(q.id); } }) : null,
           h("span", {}, h("strong", {}, q.detail.description || "(sans option)"),
@@ -1070,7 +1083,7 @@ function carteGroupeNom(groupe) {
     : null;
   return h("section", { class: "carte" + (toutesSel ? " selectionnee" : "") },
     h("div", { class: "tete-article" },
-      h("h2", { style: "padding:0" }, `SumUp vend « ${groupe[0].detail.nom} »`),
+      h("h2", { style: "padding:0" }, `SumUp vend « ${groupe[0].detail.nom} »${texteCouleurs(n)}`),
       h("label", { class: "ligne-editeur note" }, h("input", { type: "checkbox", checked: toutesSel, onchange: (e) => {
         ids.forEach((id) => (e.target.checked ? etat.selection.add(id) : etat.selection.delete(id)));
         dessinerQuestions();
@@ -1231,12 +1244,13 @@ const euros = (x) => (Math.round(x * 100) / 100).toLocaleString("fr-FR", { style
 
 async function pageBilan(id) {
   etat.bilan = await api(`/salons/${id}/bilan`);
-  // Options de couleur ignorées : une case par nom de caisse, enregistrée sur la variante « sans option » (ou la première).
+  // Une case par nom de caisse et nombre de couleurs (encreurs) ; la couleur elle-même ne compte pas.
   const groupes = new Map();
   for (const c of etat.bilan.caisse) {
-    const nom = c.nom_affiche.split(" · ")[0];
+    const [base, option] = c.nom_affiche.split(" · ");
+    const n = nbCouleurs(option);
+    const nom = base + texteCouleurs(n);
     const g = groupes.get(nom) ?? groupes.set(nom, { nom, cle: c.cle, tampons: c.tampons, especes: 0 }).get(nom);
-    if (!c.nom_affiche.includes(" · ")) { g.cle = c.cle; g.tampons = c.tampons; }
     g.especes += c.especes;
   }
   etat.bilan.groupes = [...groupes.values()];
@@ -1298,8 +1312,141 @@ function dessinerBilan() {
   page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, tuiles, ...alertes, articles, especes));
 }
 
+// ───────────── À acheter ─────────────
+async function pageAchats() {
+  etat.achats = await api("/achats");
+  dessinerAchats();
+}
+
+function texteLots(l) {
+  if (l.tout_le_disponible) return "tout le disponible";
+  if (l.sans_quantite) return "1 pot";
+  return l.lots ? `${l.a_commander} (${l.lots.nombre} lot${l.lots.nombre > 1 ? "s" : ""} de ${l.lots.taille})` : String(l.a_commander);
+}
+
+function dessinerAchats() {
+  const d = etat.achats;
+  entete("À acheter");
+  const page = document.getElementById("page");
+  const act = etat.achatAction;
+  const blocs = [];
+  blocs.push(h("p", { class: "note", style: "margin:0" }, d.preparation
+    ? `Pour la préparation en cours (${d.salons.map((s) => s.nom).join(" + ")}, premier jour le ${fmtDate(d.salons[0].date_debut)}), d'après les étapes de l'Atelier. « À commander avant » = premier jour − délai du fournisseur.`
+    : "Aucune préparation en cours : seuls les pots presque vides et les quantités fixées à la main apparaissent."));
+  if (d.alertes.length) blocs.push(h("div", { class: "question" }, h("strong", {}, "Récup"), d.alertes.map((a) => h("div", {}, a))));
+
+  const ligne = (l) => {
+    const ouvert = act && act.piece_id === l.piece_id ? act : null;
+    let panneau = null;
+    if (ouvert?.type === "commande") {
+      const q = h("input", { class: "compte", type: "number", min: "1", step: "1", value: l.tout_le_disponible || l.sans_quantite ? "" : String(l.a_commander), placeholder: "quantité", "aria-label": "Quantité commandée" });
+      const lot = h("input", { class: "compte", type: "number", min: "1", step: "1", value: l.lots ? String(l.lots.taille) : "", placeholder: "lot ?", "aria-label": "Taille du lot" });
+      panneau = h("div", { class: "ligne-editeur" }, "Commandé :", q, h("span", { class: "note" }, "par lots de"), lot,
+        h("button", { class: "btn", onclick: () => tenter(async () => {
+          if (!l.sans_quantite && q.value === "") throw new Error("Indiquez la quantité commandée (ce que vous avez pu prendre).");
+          await api("/commandes", { method: "POST", body: { piece_id: l.piece_id, quantite: l.sans_quantite ? 1 : Number(q.value), taille_lot: lot.value === "" ? null : Number(lot.value) } });
+          etat.achatAction = null; flash("Noté comme commandé."); await pageAchats();
+        }) }, "Valider"),
+        h("button", { class: "btn-sec", onclick: () => { etat.achatAction = null; dessinerAchats(); } }, "Annuler"));
+    } else if (ouvert?.type === "compter") {
+      const q = h("input", { class: "compte", type: "number", min: "0", step: "1", "aria-label": "Combien en avez-vous ?" });
+      panneau = h("div", { class: "ligne-editeur" }, `Combien de ${l.nom} avez-vous vraiment ?`, q,
+        h("button", { class: "btn", onclick: () => tenter(async () => {
+          if (q.value === "") throw new Error("Indiquez un nombre.");
+          await enregistrerComptage([{ piece_id: l.piece_id, compte: Number(q.value) }]);
+          etat.achatAction = null; await pageAchats();
+        }) }, "Valider"),
+        h("button", { class: "btn-sec", onclick: () => { etat.achatAction = null; dessinerAchats(); } }, "Annuler"));
+    } else if (ouvert?.type === "modifier") {
+      const q = h("input", { class: "compte", type: "number", min: "1", step: "1", value: l.ajuste && !l.sans_quantite ? String(l.a_commander) : "", placeholder: "calcul", "aria-label": "Quantité" });
+      const dt = h("input", { type: "date", value: l.avant_le ?? "", "aria-label": "À commander avant le", style: "min-height:36px;border:1px solid var(--bord-fort);border-radius:8px;padding:0 8px" });
+      panneau = h("div", { class: "ligne-editeur" }, "Quantité", q, "à commander avant le", dt,
+        h("button", { class: "btn", onclick: () => tenter(async () => {
+          await api("/achats/ajustement", { method: "PUT", body: { piece_id: l.piece_id, quantite: q.value === "" ? null : Number(q.value), avant_le: dt.value || null } });
+          etat.achatAction = null; await pageAchats();
+        }) }, "Enregistrer"),
+        l.ajuste ? h("button", { class: "btn-sec", onclick: () => tenter(async () => {
+          await api("/achats/ajustement", { method: "PUT", body: { piece_id: l.piece_id, quantite: null, avant_le: null } });
+          etat.achatAction = null; await pageAchats();
+        }) }, "Revenir au calcul") : null,
+        h("button", { class: "btn-sec", onclick: () => { etat.achatAction = null; dessinerAchats(); } }, "Annuler"));
+    }
+    const ouvrir = (type) => () => { etat.achatAction = { piece_id: l.piece_id, type }; dessinerAchats(); };
+    return [
+      h("tr", {},
+        h("td", {}, h("strong", {}, l.nom), h("div", { class: "note", style: "font-size:12px" }, l.famille)),
+        h("td", { class: "note" }, l.calcul + (l.ajuste ? " · modifié à la main" : "")),
+        h("td", { class: "num qte" }, texteLots(l)),
+        h("td", { class: l.en_retard ? "manque-txt" : "" }, l.avant_le ? (l.en_retard ? "⚠ " : "") + fmtDate(l.avant_le) : h("span", { class: "note" }, l.delai_inconnu ? "délai inconnu" : "—")),
+        h("td", {}, h("div", { class: "actions-ligne" },
+          h("button", { class: "btn-petit", disabled: !!act, onclick: ouvrir("commande") }, "Commandé"),
+          l.sans_quantite ? null : h("button", { class: "btn-petit", disabled: !!act, onclick: ouvrir("compter") }, "J'en ai déjà"),
+          h("button", { class: "btn-petit", disabled: !!act, onclick: ouvrir("modifier") }, "Modifier")))),
+      panneau ? h("tr", {}, h("td", { colspan: "5", style: "background:#FBF8F2" }, panneau)) : null,
+    ];
+  };
+
+  blocs.push(h("section", { class: "carte" }, h("h2", {}, "À commander"),
+    d.lignes.length ? h("table", { class: "tbl" },
+      h("thead", {}, h("tr", {}, ["Fourniture", "Calcul", "À commander", "Avant le", ""].map((t, i) => h("th", { class: i === 2 ? "num" : null }, t)))),
+      h("tbody", {}, d.lignes.flatMap(ligne))) : h("div", { class: "vide" }, "Rien à commander pour l'instant.")));
+
+  blocs.push(h("section", { class: "carte" }, h("h2", {}, "Commandé, en attente"),
+    d.commandes.length ? h("table", { class: "tbl" }, h("tbody", {}, d.commandes.flatMap((cmd) => {
+      const ouvert = act && act.commande_id === cmd.id;
+      const q = h("input", { class: "compte", type: "number", min: "0", step: "1", value: String(cmd.quantite), "aria-label": "Quantité reçue" });
+      const lot = h("input", { class: "compte", type: "number", min: "1", step: "1", value: cmd.taille_lot ?? "", placeholder: "lot ?", "aria-label": "Taille du lot reçu" });
+      return [
+        h("tr", {},
+          h("td", { style: "font-weight:600" }, cmd.nom),
+          h("td", { class: "num" }, cmd.suivi === "quantite" ? cmd.quantite + (cmd.taille_lot ? ` (lots de ${cmd.taille_lot})` : "") : "1 pot"),
+          h("td", { class: "note" }, "commandé le " + fmtDate(cmd.commande_le.slice(0, 10))),
+          h("td", {}, h("div", { class: "actions-ligne" },
+            h("button", { class: "btn-petit", disabled: !!act, onclick: () => { etat.achatAction = { commande_id: cmd.id }; dessinerAchats(); } }, "Reçu…"),
+            h("button", { class: "btn-petit", disabled: !!act, onclick: () => tenter(async () => {
+              if (!confirm(`Annuler la commande de ${cmd.nom} ?`)) return;
+              await api("/commandes/" + cmd.id, { method: "DELETE" }); await pageAchats();
+            }) }, "Annuler")))),
+        ouvert ? h("tr", {}, h("td", { colspan: "4", style: "background:#FBF8F2" }, h("div", { class: "ligne-editeur" },
+          cmd.suivi === "quantite" ? ["Reçu :", q, h("span", { class: "note" }, "taille du lot"), lot] : "Pot reçu.",
+          h("button", { class: "btn", onclick: () => tenter(async () => {
+            await api(`/commandes/${cmd.id}/recu`, { method: "POST", body: cmd.suivi === "quantite" ? { quantite: Number(q.value), taille_lot: lot.value === "" ? null : Number(lot.value) } : {} });
+            etat.achatAction = null; flash("Reçu : entré en stock."); await pageAchats();
+          }) }, "Valider"),
+          h("button", { class: "btn-sec", onclick: () => { etat.achatAction = null; dessinerAchats(); } }, "Annuler")))) : null,
+      ];
+    }))) : h("div", { class: "vide" }, "Aucune commande en attente.")));
+
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, ...blocs));
+}
+
+// Réglages d'achat d'une fourniture (délai, mode, lots).
+async function ouvrirReglageAchat(p) {
+  const r = await api(`/pieces/${p.id}/achat`);
+  etat.achatEdition = { id: p.id, delai: r.delai_jours ?? "", mode: r.mode_achat ?? "quantite", lots: r.lots.join(", ") };
+  dessinerReglages();
+}
+
+function editeurAchat(p) {
+  const e = etat.achatEdition;
+  return h("tr", {}, h("td", { colspan: "5", style: "background:#FBF8F2" }, h("div", { class: "formulaire", style: "padding:4px 0" },
+    h("strong", { style: "align-self:center" }, "Achat · " + p.nom),
+    h("label", {}, "Délai du fournisseur (jours)", h("input", { type: "number", min: "0", step: "1", value: String(e.delai), style: "width:120px", oninput: (ev) => { e.delai = ev.target.value; } })),
+    h("label", {}, "Se commande", h("select", { onchange: (ev) => { e.mode = ev.target.value; } },
+      [["quantite", "à la quantité"], ["tout_le_disponible", "tout le disponible (stock fournisseur limité)"], ["jamais", "jamais (récup)"]]
+        .map(([k, v]) => h("option", { value: k, selected: e.mode === k }, v)))),
+    h("label", {}, "Tailles de lot (ex. 30, 80, 160)", h("input", { value: e.lots, placeholder: "inconnues", oninput: (ev) => { e.lots = ev.target.value; } })),
+    h("button", { class: "btn", onclick: () => tenter(async () => {
+      const lots = e.lots.split(/[,;\s]+/).filter(Boolean).map(Number);
+      if (lots.some((t) => !Number.isInteger(t) || t < 1)) throw new Error("Tailles de lot : des nombres entiers séparés par des virgules.");
+      await api(`/pieces/${p.id}/achat`, { method: "PUT", body: { delai_jours: e.delai === "" ? null : Number(e.delai), mode_achat: e.mode, lots } });
+      etat.achatEdition = null; flash("Réglages d'achat enregistrés."); await pageReglages();
+    }) }, "Enregistrer"),
+    h("button", { class: "btn-sec", onclick: () => { etat.achatEdition = null; dessinerReglages(); } }, "Annuler"))));
+}
+
 window.addEventListener("hashchange", () => {
-  Object.assign(etat, { corrEdition: null, comptage: null, ligneEnCours: null, edition: null, editeur: null, fait: null, salonEdition: null, comptageAvant: null });
+  Object.assign(etat, { achatAction: null, achatEdition: null, corrEdition: null, comptage: null, ligneEnCours: null, edition: null, editeur: null, fait: null, salonEdition: null, comptageAvant: null });
   afficher();
 });
 afficher();
