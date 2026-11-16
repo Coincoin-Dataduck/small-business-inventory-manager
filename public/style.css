@@ -218,3 +218,24 @@ input.compte, .formulaire input, .formulaire select, .editeur select, .editeur i
 .tbl-stock { table-layout: fixed; }
 .tbl-stock .c-badge { width: 170px; } .tbl-stock .c-qte { width: 90px; } .tbl-stock .c-note { width: 200px; } .tbl-stock .c-action { width: 230px; }
 @media (max-width: 760px) { .tbl-stock { table-layout: auto; } .tbl-stock col { width: auto !important; } }
+
+/* Comptage : ligne comptée marquée en viridian, avancement, version téléphone en blocs */
+.attendu { display: none; }
+.en-comptage .tbl-stock tr.compte-fait td:first-child { box-shadow: inset 6px 0 0 var(--vert); }
+.barre-comptage .progression { flex: 0 1 160px; height: 10px; border: 2px solid var(--encre); background: var(--carte); }
+.barre-comptage .progression i { display: block; height: 100%; background: var(--vermillon); transition: width .2s; }
+.barre-comptage { position: sticky; bottom: 0; padding: 12px 14px; background: var(--carte); border: 2px solid var(--encre); box-shadow: 4px 4px 0 var(--encre); }
+@media (max-width: 760px) {
+  .en-comptage .tbl-stock, .en-comptage .tbl-stock tbody { display: block; }
+  .en-comptage .tbl-stock colgroup { display: none; }
+  .en-comptage .tbl-stock tr:not(.groupe) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px; align-items: center; margin: 8px 10px; padding: 8px 10px; border: 2px solid var(--encre); background: var(--carte); }
+  .en-comptage .tbl-stock tr.groupe { display: block; }
+  .en-comptage .tbl-stock tr:not(.groupe) td { padding: 0; border: 0; }
+  .en-comptage .tbl-stock td.col-badge, .en-comptage .tbl-stock td.qte, .en-comptage .tbl-stock td.note { display: none; }
+  .en-comptage .tbl-stock tr.compte-fait { box-shadow: inset 6px 0 0 var(--vert); }
+  .en-comptage .tbl-stock tr.compte-fait td:first-child { box-shadow: none; }
+  .en-comptage .attendu { display: block; font-weight: 400; font-size: 12px; color: var(--doux); }
+  .en-comptage input.compte { width: 68px; min-height: 40px; font-family: var(--f-titre); font-size: 18px; text-align: right; border-width: 2px; }
+  .barre-comptage { margin: 0 -16px; box-shadow: none; border-width: 2px 0 0; }
+  .barre-comptage .progression { max-width: none; flex-basis: 100%; }
+}

@@ -172,7 +172,7 @@ function dessinerStock() {
   );
 
   const barre = enComptage ? barreComptage() : null;
-  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, filtres, legende, ...cartes, barre));
+  page.replaceChildren(h("div", { class: "stock" + (enComptage ? " en-comptage" : ""), style: "display:flex;flex-direction:column;gap:18px" }, filtres, legende, ...cartes, barre));
 }
 
 // Dans une famille : les articles à vendre d'abord, puis les fournitures (maison, achetées, récup).
@@ -208,6 +208,7 @@ function ligneStock(p) {
         placeholder: String(p.stock), value: saisi ?? "",
         oninput: (e) => {
           etat.comptage[p.id] = e.target.value;
+          e.target.closest("tr")?.classList.toggle("compte-fait", e.target.value !== "");
           const d = e.target.value === "" ? 0 : Number(e.target.value) - p.stock;
           ecartEl.textContent = d ? signe(d) : "";
           ecartEl.className = "ecart" + (d > 0 ? " plus" : "");
@@ -246,9 +247,10 @@ function ligneStock(p) {
       }, p.presque_vide ? "Pot remplacé" : "Pot presque vide"));
   }
 
-  return h("tr", {},
+  const compte = etat.comptage !== null && comptable && (etat.comptage[p.id] ?? "") !== "";
+  return h("tr", { class: compte ? "compte-fait" : null },
     h("td", { class: "col-badge" }, h("span", { class: "badge badge-" + p.niveau }, NIVEAUX[p.niveau])),
-    h("td", { style: "font-weight:600" }, p.nom),
+    h("td", { style: "font-weight:600" }, p.nom, etat.comptage !== null && comptable ? h("small", { class: "attendu" }, "attendu " + p.stock) : null),
     h("td", { class: "num qte" + (comptable && p.stock < 0 ? " neg" : comptable && p.stock === 0 ? " zero" : "") }, qte),
     h("td", { class: "note" }, noteStock(p)),
     h("td", { class: "col-action" }, action),
@@ -268,6 +270,7 @@ function nbEcarts() {
 
 function barreComptage() {
   return h("div", { class: "barre-comptage", id: "barre-comptage" },
+    h("div", { class: "progression", "aria-hidden": "true" }, h("i", { id: "progression", style: `width:${progression()}%` })),
     h("span", { id: "nb-ecarts" }, texteEcarts()),
     h("button", { class: "btn-sec", onclick: () => { etat.comptage = null; if (etat.comptageAvant) { etat.comptageAvant = null; location.hash = "salons"; } else dessinerStock(); } }, "Annuler"),
     h("button", { class: "btn", onclick: () => tenter(sauverComptage) }, "Enregistrer le comptage"),
@@ -279,9 +282,16 @@ function texteEcarts() {
   return `${n} ligne(s) comptée(s) · ${e} écart(s) · les cases vides ne sont pas comptées`;
 }
 
+function progression() {
+  const total = piecesVisibles().flatMap((f) => f.pieces).filter((p) => p.suivi === "quantite").length;
+  return total ? Math.round((lignesSaisies().length / total) * 100) : 0;
+}
+
 function majBarreComptage() {
   const el = document.getElementById("nb-ecarts");
   if (el) el.textContent = texteEcarts();
+  const p = document.getElementById("progression");
+  if (p) p.style.width = progression() + "%";
 }
 
 function demarrerComptage() {
