@@ -7,6 +7,7 @@ import { atelier } from "./atelier";
 import { questions } from "./questions";
 import { bilan, familleThermometre } from "./bilan";
 import { achats } from "./achats";
+import { accueil } from "./accueil";
 import { importer } from "./sumup";
 import { controlerAcces } from "./acces";
 // @ts-expect-error : importé comme texte (règle « Text » de wrangler.jsonc)
@@ -179,6 +180,7 @@ app.route("/", atelier);
 app.route("/", questions);
 app.route("/", bilan);
 app.route("/", achats);
+app.route("/", accueil);
 
 app.onError((e, c) => {
   if (e instanceof HTTPException) return c.json({ erreur: e.message }, e.status);

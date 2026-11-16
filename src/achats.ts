@@ -22,9 +22,11 @@ export function arrondirAuLot(besoin: number, lots: number[]) {
   return { quantite: meilleur.quantite, lots: { nombre: meilleur.nombre, taille: meilleur.taille } };
 }
 
-achats.get("/achats", async (c) => {
-  const db = c.env.DB;
-  const plan = await planActuel(db);
+achats.get("/achats", async (c) => c.json(await calculerAchats(c.env.DB)));
+
+/** Lignes à commander pour la préparation en cours (partagé par À acheter et l'Accueil). */
+export async function calculerAchats(db: D1Database, planDeja?: Awaited<ReturnType<typeof planActuel>>) {
+  const plan = planDeja ?? await planActuel(db);
   const [piecesR, lotsR, routeR, ajustR, commandesR] = await db.batch([
     db.prepare(`SELECT p.id, p.nom, p.niveau, p.suivi, p.delai_jours, p.mode_achat, p.presque_vide, f.nom AS famille, ${STOCK_SQL} AS stock
                 FROM piece p JOIN famille f ON f.id = p.famille_id WHERE p.niveau IN ('achete', 'recup')`),
@@ -73,8 +75,8 @@ achats.get("/achats", async (c) => {
     });
   }
   lignes.sort((a, b) => (a.avant_le ?? "9999").localeCompare(b.avant_le ?? "9999") || a.nom.localeCompare(b.nom));
-  return c.json({ preparation: plan.preparation, salons: plan.preparation ? plan.salons : [], lignes, alertes, commandes: commandesR.results });
-});
+  return { preparation: plan.preparation, salons: plan.preparation ? plan.salons : [], lignes, alertes, commandes: commandesR.results as { id: number; piece_id: number; nom: string }[] };
+}
 
 // Modifier une ligne : quantité et/ou date choisies à la main ; tout vide = revenir au calcul.
 achats.put("/achats/ajustement", async (c) => {

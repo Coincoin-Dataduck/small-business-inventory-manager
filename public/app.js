@@ -6,6 +6,7 @@ const SUIVIS = {
   sans_quantite: "Sans quantité (ex. peinture)",
 };
 const PAGES = [
+  { id: "accueil", label: "Accueil" },
   { id: "stock", label: "Stock" },
   { id: "atelier", label: "Atelier" },
   { id: "achats", label: "À acheter" },
@@ -69,7 +70,7 @@ function pageCourante() {
   etat.params = params;
   if (id === "objectifs" && params[0]) return "objectifs";
   if (id === "bilan" && params[0]) return "bilan";
-  return PAGES.some((p) => p.id === id && !p.bientot) ? id : "stock";
+  return PAGES.some((p) => p.id === id && !p.bientot) ? id : "accueil";
 }
 
 function dessinerMenu() {
@@ -92,6 +93,7 @@ async function afficher() {
   dessinerMenu();
   if (etat.page !== "questions") compterQuestions();
   await tenter(async () => {
+    if (etat.page === "accueil") await pageAccueil();
     if (etat.page === "stock") await pageStock();
     if (etat.page === "reglages") await pageReglages();
     if (etat.page === "atelier") await pageAtelier();
@@ -1533,8 +1535,195 @@ function editeurAchat(p) {
     h("button", { class: "btn-sec", onclick: () => { etat.achatEdition = null; dessinerReglages(); } }, "Annuler"))));
 }
 
+// ───────────── Accueil : rétro-planning ─────────────
+const glisserPossible = () => window.matchMedia("(pointer: fine)").matches;
+const plusJours = (d, n) => new Date(Date.parse(d + "T00:00:00Z") + n * 86400000).toISOString().slice(0, 10);
+
+async function pageAccueil() {
+  etat.accueil = await api("/accueil");
+  dessinerAccueil();
+}
+
+async function deplacerJalon(j, date) {
+  const prep = etat.accueil.preparation.id;
+  if (j.type === "perso") await api("/jalons/" + j.id, { method: "PATCH", body: { date } });
+  else await api("/jalons/standard", { method: "PUT", body: { salon_id: prep, type: j.type, date } });
+}
+
+function dessinerAccueil() {
+  const d = etat.accueil;
+  entete("Accueil");
+  const page = document.getElementById("page");
+  if (!d.preparation) {
+    page.replaceChildren(h("div", { class: "carte" }, h("div", { class: "vide" },
+      "Aucun salon à venir. Ajoutez le prochain dans ", h("a", { href: "#salons" }, "Salons"), " : le rétro-planning apparaîtra ici.")));
+    return;
+  }
+  const premier = d.salons[0];
+  const dernierFin = d.salons.reduce((m, s) => (s.fin > m ? s.fin : m), premier.fin);
+  const dates = [d.aujourdhui, ...d.jalons.map((j) => j.date), dernierFin];
+  const debut = plusJours(dates.reduce((m, x) => (x < m ? x : m)), -2);
+  const fin = plusJours(dates.reduce((m, x) => (x > m ? x : m)), 3);
+  const total = joursEntre(debut, fin) + 1;
+  const pct = (date) => (joursEntre(debut, date) / total) * 100;
+  const avertDe = (j) => d.avertissements.filter((a) => a.type === j.type && (a.id === null || a.id === j.id));
+  const jAvant = joursEntre(d.aujourdhui, premier.date_debut);
+
+  const frise = h("div", { class: "frise" + (glisserPossible() ? " glissable" : "") });
+  const dateDepuis = (clientX) => {
+    const r = frise.getBoundingClientRect();
+    const k = Math.round(((clientX - r.left) / r.width) * total - 0.5);
+    return plusJours(debut, Math.max(0, Math.min(total - 1, k)));
+  };
+
+  // Graduations : une par semaine (lundi), le mois quand il change.
+  const grad = h("div", { class: "frise-axe" });
+  for (let i = 0; i < total; i++) {
+    const jour = plusJours(debut, i), dt = new Date(jour + "T00:00:00Z");
+    if (dt.getUTCDay() === 1 || i === 0) grad.append(h("span", { class: "graduation", style: `left:${pct(jour)}%` }, fmtDate(jour)));
+  }
+  frise.append(grad);
+  frise.append(h("div", { class: "aujourdhui", style: `left:${pct(d.aujourdhui) + 50 / total}%` }, h("span", {}, "aujourd'hui")));
+
+  // Salons (fixes).
+  for (const s of d.salons) {
+    frise.append(h("div", { class: "frise-salon", style: `left:${pct(s.date_debut)}%;width:${((joursEntre(s.date_debut, s.fin) + 1) / total) * 100}%`, title: s.nom }));
+    frise.append(h("span", { class: "frise-salon-nom", style: `left:${pct(s.date_debut)}%` }, s.nom));
+  }
+
+  // Bande de fabrication, bords glissables.
+  const fab0 = d.jalons.find((j) => j.type === "fabrication_debut"), fab1 = d.jalons.find((j) => j.type === "fabrication_fin");
+  const bande = h("div", { class: "frise-fabrication" + (avertDe(fab1).length ? " alerte" : "") + (fab1.fait ? " fait" : "") });
+  const placerBande = (a, b) => {
+    bande.style.left = pct(a) + "%";
+    bande.style.width = Math.max(0, ((joursEntre(a, b) + 1) / total) * 100) + "%";
+    bande.firstChild && (bande.firstChild.textContent = `Fabrication · ${Math.max(0, joursEntre(a, b) + 1)} jour(s)`);
+  };
+  bande.append(h("span", { class: "frise-fabrication-texte" }, ""));
+  placerBande(fab0.date, fab1.date);
+  for (const [j, cote] of [[fab0, "g"], [fab1, "d"]]) bande.append(poignee(j, cote));
+  frise.append(bande);
+
+  // Jalons : rangées pour éviter que les étiquettes se chevauchent.
+  const autres = d.jalons.filter((j) => !j.type.startsWith("fabrication")).sort((a, b) => a.date.localeCompare(b.date));
+  const fins = [];
+  for (const j of autres) {
+    const x = pct(j.date);
+    let r = fins.findIndex((f) => x - f > 16);
+    if (r === -1) { r = fins.length; fins.push(-1); }
+    fins[r] = x;
+    j._rang = r;
+  }
+  for (const j of autres) frise.append(marqueur(j));
+  frise.style.setProperty("--rangs", String(Math.max(1, fins.length)));
+
+  function poignee(j, cote) {
+    const el = h("span", { class: "poignee poignee-" + cote, title: `${j.nom} : ${fmtDate(j.date)} (glisser pour déplacer)` });
+    brancherGlisser(el, j, (date) => (j === fab0 ? placerBande(date, fab1.date) : placerBande(fab0.date, date)));
+    return el;
+  }
+
+  function marqueur(j) {
+    const alerte = avertDe(j).length && !j.fait;
+    const el = h("div", { class: "jalon" + (j.fait ? " fait" : "") + (alerte ? " alerte" : "") + (etat.jalonChoisi === (j.id ?? j.type) ? " choisi" : ""),
+      style: `left:${pct(j.date) + 50 / total}%;--rang:${j._rang}` },
+      h("span", { class: "losange" }),
+      h("span", { class: "etiquette" }, (j.fait ? "✓ " : alerte ? "⚠ " : "") + j.nom, h("small", {}, fmtDate(j.date))));
+    brancherGlisser(el, j, (date) => { el.style.left = pct(date) + 50 / total + "%"; el.querySelector("small").textContent = fmtDate(date); });
+    return el;
+  }
+
+  // Glisser : la date suit la souris au jour près ; un simple clic ouvre le détail du jalon.
+  function brancherGlisser(el, j, apercu) {
+    el.addEventListener("pointerdown", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const x0 = e.clientX; let date = j.date, bouge = false;
+      const peutGlisser = glisserPossible();
+      if (peutGlisser) el.setPointerCapture(e.pointerId);
+      const move = (ev) => {
+        if (!peutGlisser) return;
+        if (Math.abs(ev.clientX - x0) > 3) bouge = true;
+        if (!bouge) return;
+        date = dateDepuis(ev.clientX);
+        apercu(date);
+      };
+      const up = () => {
+        el.removeEventListener("pointermove", move); el.removeEventListener("pointerup", up); el.removeEventListener("pointercancel", up);
+        if (!bouge) { etat.jalonChoisi = j.id ?? j.type; dessinerAccueil(); return; }
+        if (date === j.date) return;
+        tenter(async () => { await deplacerJalon(j, date); etat.jalonChoisi = j.id ?? j.type; await pageAccueil(); });
+      };
+      el.addEventListener("pointermove", move); el.addEventListener("pointerup", up); el.addEventListener("pointercancel", up);
+    });
+  }
+
+  // Détail du jalon choisi.
+  const choisi = d.jalons.find((j) => (j.id ?? j.type) === etat.jalonChoisi);
+  let detail = null;
+  if (choisi) {
+    const prep = d.preparation.id;
+    const champDate = h("input", { type: "date", value: choisi.date, "aria-label": "Date", onchange: (e) => tenter(async () => { if (e.target.value) { await deplacerJalon(choisi, e.target.value); await pageAccueil(); } }) });
+    detail = h("div", { class: "detail-jalon" },
+      h("strong", {}, choisi.nom), champDate,
+      choisi.fait_auto ? h("span", { class: "note" }, "✓ fait (constaté par l'outil)")
+        : h("label", { class: "ligne-editeur" }, h("input", { type: "checkbox", checked: choisi.fait, onchange: (e) => tenter(async () => {
+            if (choisi.type === "perso") await api("/jalons/" + choisi.id, { method: "PATCH", body: { fait: e.target.checked } });
+            else await api("/jalons/standard", { method: "PUT", body: { salon_id: prep, type: choisi.type, date: choisi.date, fait: e.target.checked } });
+            await pageAccueil();
+          }) }), "fait"),
+      choisi.type !== "perso" && choisi.deplace ? h("button", { class: "btn-petit", onclick: () => tenter(async () => {
+        await api("/jalons/standard", { method: "PUT", body: { salon_id: prep, type: choisi.type, date: null } }); await pageAccueil();
+      }) }, "Revenir à la date proposée") : null,
+      choisi.type === "perso" ? h("button", { class: "btn-petit", onclick: () => tenter(async () => {
+        if (!confirm(`Supprimer « ${choisi.nom} » ?`)) return;
+        await api("/jalons/" + choisi.id, { method: "DELETE" }); etat.jalonChoisi = null; await pageAccueil();
+      }) }, "Supprimer") : null,
+      lienJalon(choisi.type),
+      h("button", { class: "btn-petit", onclick: () => { etat.jalonChoisi = null; dessinerAccueil(); } }, "Fermer"));
+  }
+
+  // Ajouter un jalon à la main.
+  const nomNouveau = h("input", { placeholder: "ex. Imprimer les prints", "aria-label": "Nom du jalon" });
+  const dateNouveau = h("input", { type: "date", value: plusJours(d.aujourdhui, 7), "aria-label": "Date du jalon" });
+  const ajout = h("form", { class: "ligne-editeur", onsubmit: (e) => { e.preventDefault(); tenter(async () => {
+    await api("/jalons", { method: "POST", body: { salon_id: d.preparation.id, nom: nomNouveau.value, date: dateNouveau.value } });
+    flash("Jalon ajouté."); await pageAccueil();
+  }); } }, nomNouveau, dateNouveau, h("button", { class: "btn-sec" }, "+ Ajouter un jalon"));
+
+  const tuile = (titre, valeur, sous, lien) => h("a", { class: "tuile tuile-lien", href: lien }, h("span", { class: "note" }, titre), h("strong", {}, valeur), h("span", { class: "note", style: "font-size:13px" }, sous));
+  const f = d.fabrication;
+  const tuiles = h("div", { class: "tuiles" },
+    tuile("Atelier", f.articles_manquants ? `${f.articles_manquants} article(s)` : "rien à faire", f.etapes ? `${f.etapes} étape(s) · ≈ ${dureeTexte(f.travail_min)}` : "tout est prêt", "#atelier"),
+    tuile("À acheter", d.achats ? `${d.achats} ligne(s)` : "rien", "commandes de la préparation", "#achats"),
+    tuile("Questions", String(d.questions), "noms de caisse, ventes impossibles…", "#questions"));
+
+  const liste = h("ol", { class: "liste-jalons" }, [...d.jalons].sort((a, b) => a.date.localeCompare(b.date)).map((j) =>
+    h("li", { class: (j.fait ? "fait" : "") + (avertDe(j).length && !j.fait ? " alerte" : "") },
+      h("span", { class: "note" }, fmtDate(j.date)), " ", (j.fait ? "✓ " : "") + j.nom)));
+
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" },
+    h("section", { class: "carte" },
+      h("div", { class: "tete-article" },
+        h("div", {}, h("h2", { style: "padding:0" }, "On prépare : " + d.salons.map((s) => s.nom).join(" + ")),
+          h("div", { class: "note" }, `Premier jour le ${fmtDateLongue(premier.date_debut)} · ${jAvant > 0 ? `dans ${jAvant} jour${jAvant > 1 ? "s" : ""}` : "c'est maintenant"}`)),
+        h("span", { class: "note", style: "font-size:13px" }, glisserPossible() ? "Glissez les jalons pour les déplacer · clic = détail" : "Touchez un jalon pour le modifier")),
+      h("div", { class: "frise-cadre" }, frise),
+      detail,
+      d.avertissements.length ? h("div", { class: "question", style: "margin:0 14px 14px" }, d.avertissements.map((a) => h("div", {}, "⚠ " + a.texte))) : null,
+      h("div", { style: "padding:0 14px 14px;display:flex;flex-direction:column;gap:10px" }, liste, ajout)),
+    tuiles));
+}
+
+function lienJalon(type) {
+  const liens = { objectifs: ["#objectifs/" + etat.accueil.preparation.id, "Ouvrir les objectifs"], commandes: ["#achats", "Ouvrir À acheter"],
+    fabrication_debut: ["#atelier", "Ouvrir l'Atelier"], fabrication_fin: ["#atelier", "Ouvrir l'Atelier"],
+    comptage: ["#stock/avant/" + etat.accueil.preparation.id, "Faire le comptage avant"], bilan: ["#bilan/" + etat.accueil.salons[0].id, "Ouvrir le bilan"] };
+  const l = liens[type];
+  return l ? h("a", { href: l[0], class: "btn-petit", style: "display:inline-flex;align-items:center;text-decoration:none" }, l[1]) : null;
+}
+
 window.addEventListener("hashchange", () => {
-  Object.assign(etat, { achatAction: null, achatEdition: null, corrEdition: null, comptage: null, ligneEnCours: null, edition: null, editeur: null, fait: null, salonEdition: null, comptageAvant: null });
+  Object.assign(etat, { jalonChoisi: null, achatAction: null, achatEdition: null, corrEdition: null, comptage: null, ligneEnCours: null, edition: null, editeur: null, fait: null, salonEdition: null, comptageAvant: null });
   afficher();
 });
 afficher();
