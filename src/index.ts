@@ -1,42 +1,8 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
-
-type Env = { DB: D1Database; SUMUP_API_KEY?: string };
+import { Env, NIVEAUX, SUIVIS, STOCK_SQL, erreur, texte, entier, choix, corps, lireLignesComptage, lirePieces, instructionsComptage } from "./outils";
+import { recettes } from "./recettes";
 const app = new Hono<{ Bindings: Env }>().basePath("/api");
-
-const NIVEAUX = ["a_vendre", "fait_maison", "achete", "recup"] as const;
-const SUIVIS = ["quantite", "sans_quantite", "generique"] as const;
-
-// Stock d'une pièce = somme de ses mouvements (voir docs/donnees.md).
-const STOCK_SQL = "(SELECT COALESCE(SUM(m.quantite), 0) FROM mouvement m WHERE m.piece_id = p.id)";
-
-function erreur(message: string, status: 400 | 404 | 409 = 400): never {
-  throw new HTTPException(status, { message });
-}
-
-function texte(v: unknown, champ: string): string {
-  if (typeof v !== "string" || !v.trim()) erreur(`« ${champ} » est obligatoire.`);
-  return v.trim();
-}
-
-function entier(v: unknown, champ: string, min = 0): number {
-  const n = typeof v === "string" && v.trim() !== "" ? Number(v) : v;
-  if (typeof n !== "number" || !Number.isInteger(n) || n < min) erreur(`« ${champ} » doit être un nombre entier ≥ ${min}.`);
-  return n;
-}
-
-function choix<T extends string>(v: unknown, permis: readonly T[], champ: string): T {
-  if (!permis.includes(v as T)) erreur(`« ${champ} » invalide.`);
-  return v as T;
-}
-
-async function corps(c: { req: { json: () => Promise<unknown> } }): Promise<Record<string, unknown>> {
-  try {
-    const b = await c.req.json();
-    if (b && typeof b === "object" && !Array.isArray(b)) return b as Record<string, unknown>;
-  } catch {}
-  erreur("Données reçues illisibles.");
-}
 
 // ───────────── Familles ─────────────
 app.get("/familles", async (c) => {
@@ -141,45 +107,23 @@ app.post("/comptages", async (c) => {
   const b = await corps(c);
   const type = b.type === undefined ? "libre" : choix(b.type, ["libre", "avant"] as const, "type");
   const preparation_id = b.preparation_id == null ? null : entier(b.preparation_id, "préparation", 1);
-  if (!Array.isArray(b.lignes) || !b.lignes.length) erreur("Aucune quantité comptée.");
-  const lignes = b.lignes.map((l: Record<string, unknown>) => ({
-    piece_id: entier(l?.piece_id, "pièce", 1),
-    compte: entier(l?.compte, "quantité comptée", 0),
-  }));
-  const ids = [...new Set(lignes.map((l) => l.piece_id))];
-  if (ids.length !== lignes.length) erreur("Une pièce apparaît deux fois dans le comptage.");
+  const lignes = lireLignesComptage(b.lignes);
+  if (!lignes.length) erreur("Aucune quantité comptée.");
+  const pieces = await lirePieces(c.env.DB, lignes.map((l) => l.piece_id));
+  if ([...pieces.values()].some((p) => p.suivi !== "quantite")) erreur("Cette pièce ne se compte pas (sans quantité ou générique).");
 
-  const { results: trouvees } = await c.env.DB.prepare(
-    `SELECT id, suivi FROM piece WHERE id IN (${ids.map(() => "?").join(",")})`,
-  ).bind(...ids).all<{ id: number; suivi: string }>();
-  if (trouvees.length !== ids.length) erreur("Pièce introuvable.", 404);
-  if (trouvees.some((p) => p.suivi !== "quantite")) erreur("Cette pièce ne se compte pas (sans quantité ou générique).");
-
-  // Tout dans un seul lot (transaction) : l'attendu est lu au moment même de l'enregistrement.
   const db = c.env.DB;
-  const stmts = [db.prepare("INSERT INTO comptage (type, preparation_id) VALUES (?, ?)").bind(type, preparation_id)];
-  for (const l of lignes) {
-    stmts.push(
-      db.prepare(
-        `INSERT INTO comptage_ligne (comptage_id, piece_id, attendu, compte)
-         VALUES ((SELECT MAX(id) FROM comptage), ?1, (SELECT COALESCE(SUM(quantite), 0) FROM mouvement WHERE piece_id = ?1), ?2)`,
-      ).bind(l.piece_id, l.compte),
-      db.prepare(
-        `INSERT INTO mouvement (piece_id, quantite, motif, source_type, source_id)
-         SELECT piece_id, compte - attendu, 'comptage', 'comptage_ligne', id FROM comptage_ligne
-         WHERE id = last_insert_rowid() AND compte <> attendu`,
-      ),
-    );
-  }
-  stmts.push(
+  const res = await db.batch([
+    ...instructionsComptage(db, lignes, type, preparation_id),
     db.prepare(
       "SELECT cl.piece_id, p.nom, cl.attendu, cl.compte, cl.compte - cl.attendu AS ecart, cl.comptage_id FROM comptage_ligne cl JOIN piece p ON p.id = cl.piece_id WHERE cl.comptage_id = (SELECT MAX(id) FROM comptage)",
     ),
-  );
-  const res = await db.batch(stmts);
+  ]);
   const detail = res[res.length - 1].results as { ecart: number; comptage_id: number }[];
   return c.json({ comptage_id: detail[0]?.comptage_id, lignes: detail, ecarts: detail.filter((d) => d.ecart !== 0).length }, 201);
 });
+
+app.route("/", recettes);
 
 app.onError((e, c) => {
   if (e instanceof HTTPException) return c.json({ erreur: e.message }, e.status);

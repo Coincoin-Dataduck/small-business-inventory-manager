@@ -24,7 +24,7 @@ Quantités toujours **entières**. Une fraction (« 1/45 de feuille de stickers 
 **mouvement** — le journal : pièce, quantité (+/−), motif (`vente` (carte), `vente_especes`, `etape`, `comptage`, `reception`, `remboursement`), date, lien vers la source (ligne de vente, étape faite, comptage, commande).
 
 ## Recettes
-**etape** — rattachée à un article (créée depuis le gabarit de sa famille, modifiable ensuite) : nom, `par_matiere` ou `a_la_piece`, temps (par pièce ou par matière entière), ordre.
+**etape** — rangée dans une **famille** (une étape peut servir à plusieurs articles : « graver une feuille de gomme » donne des gommes de plusieurs motifs ; l'Atelier retrouve une étape par ce qu'elle **donne**) : nom, `par_matiere` ou `a_la_piece`, temps (par pièce ou par matière entière), ordre. Les étapes propres à un modèle (plaque d'une couleur) sont des étapes distinctes, créées depuis le gabarit de la famille.
 
 **etape_utilise** — pièce + quantité consommée.
 

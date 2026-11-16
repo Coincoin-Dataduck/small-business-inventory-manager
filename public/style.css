@@ -72,3 +72,18 @@ input.compte { width: 76px; min-height: 36px; border: 1px solid var(--bord-fort)
   .col-badge, .note { display: none; }
   .col-action { width: auto; }
 }
+
+.editeur { display: flex; flex-direction: column; gap: 14px; padding: 14px; border-top: 1px solid var(--bord); background: #FBF8F2; }
+.bloc-editeur { display: flex; flex-direction: column; gap: 8px; align-items: flex-start; }
+.ligne-editeur { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ligne-editeur select, .editeur select, .editeur input:not(.compte) { min-height: 36px; border: 1px solid var(--bord-fort); border-radius: 8px; padding: 0 8px; background: #fff; }
+.choix-editeur { display: flex; flex-direction: column; gap: 8px; padding: 10px; border: 1px dashed var(--bord-fort); border-radius: 10px; }
+.liste-etapes { display: flex; flex-direction: column; }
+.etape { padding: 12px 14px; border-top: 1px solid var(--bord-fin); display: flex; flex-direction: column; gap: 10px; }
+.etape-tete { display: flex; justify-content: space-between; gap: 12px; align-items: flex-start; flex-wrap: wrap; }
+.etape-corps { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; font-size: 14px; }
+.etape-corps ul { margin: 4px 0 0; padding-left: 18px; }
+.panneau-fait { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 12px; background: #FBF8F2; border: 1px solid var(--bord); }
+.question { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: 10px; background: var(--alerte-fond); border: 1.5px solid var(--alerte-bord); color: var(--encre); }
+.question strong { color: var(--alerte); }
+@media (max-width: 760px) { .etape-corps { grid-template-columns: 1fr; } }

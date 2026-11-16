@@ -46,7 +46,7 @@ CREATE INDEX mouvement_piece ON mouvement(piece_id, date);
 -- ───────────── Recettes ─────────────
 CREATE TABLE etape (
   id         INTEGER PRIMARY KEY,
-  article_id INTEGER NOT NULL REFERENCES piece(id) ON DELETE CASCADE,
+  famille_id INTEGER NOT NULL REFERENCES famille(id),   -- rangement ; l'Atelier cherche les étapes par ce qu'elles donnent
   nom        TEXT NOT NULL,
   mode       TEXT NOT NULL CHECK (mode IN ('par_matiere','a_la_piece')),
   temps_min  REAL,       -- par pièce ou par matière entière selon le mode
@@ -82,6 +82,7 @@ CREATE TABLE etape_choix (
 CREATE TABLE etape_faite (
   id       INTEGER PRIMARY KEY,
   etape_id INTEGER NOT NULL REFERENCES etape(id),
+  fois     INTEGER NOT NULL CHECK (fois > 0),   -- pièces faites, ou matières entières utilisées
   date     TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   note     TEXT
 );
