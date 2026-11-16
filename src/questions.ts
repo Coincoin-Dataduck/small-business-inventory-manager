@@ -1,7 +1,7 @@
 // Questions (anti-oubli, noms SumUp inconnus, remboursements) et correspondances SumUp ↔ pièces.
 import { Hono } from "hono";
 import { Env, STOCK_SQL, erreur, entier, corps, lirePieces, instructionsComptage } from "./outils";
-import { appliquerVentes, importer } from "./sumup";
+import { appliquerVentes, appliquerEspeces, importer } from "./sumup";
 
 export const questions = new Hono<{ Bindings: Env }>();
 
@@ -26,6 +26,14 @@ questions.get("/questions", async (c) => {
     }
     sortie.push({ ...q, detail });
   }
+  // Rappel : espèces à recopier pour les salons terminés depuis moins de 30 jours (sans saisie).
+  const { results: aSaisir } = await db.prepare(
+    `SELECT s.id, s.nom, date(s.date_debut, '+' || (s.nb_jours - 1) || ' days') AS fin FROM salon s
+     WHERE date(s.date_debut, '+' || (s.nb_jours - 1) || ' days') < date('now')
+       AND date(s.date_debut, '+' || (s.nb_jours - 1) || ' days') >= date('now', '-30 days')
+       AND s.especes_montant IS NULL AND NOT EXISTS (SELECT 1 FROM vente_especes ve WHERE ve.salon_id = s.id)`,
+  ).all<{ id: number; nom: string; fin: string }>();
+  for (const s of aSaisir) sortie.push({ id: -s.id, type: "especes_a_saisir", piece_id: null, detail: { salon_id: s.id, nom: s.nom, fin: s.fin }, cree_le: s.fin });
   return c.json(sortie);
 });
 
@@ -52,9 +60,10 @@ async function definirCorrespondance(db: D1Database, cle: string, nom_affiche: s
     ...d.pieces.map((p) => db.prepare("INSERT INTO correspondance_piece (cle, piece_id, quantite) VALUES (?, ?, ?)").bind(cle, p.piece_id, p.quantite)),
     // Les ventes déjà appliquées avec l'ancienne définition sont retirées puis réappliquées.
     db.prepare("DELETE FROM mouvement WHERE source_type = 'vente_ligne' AND source_id IN (SELECT id FROM vente_ligne WHERE cle = ?)").bind(cle),
+    db.prepare("DELETE FROM mouvement WHERE source_type = 'vente_especes' AND source_id IN (SELECT id FROM vente_especes WHERE cle = ?)").bind(cle),
     db.prepare("UPDATE question SET reponse = 'défini', repondu_le = strftime('%Y-%m-%dT%H:%M:%fZ','now') WHERE type = 'nom_inconnu' AND repondu_le IS NULL AND json_extract(detail, '$.cle') = ?").bind(cle),
   ]);
-  return appliquerVentes(db, { cle });
+  return (await appliquerVentes(db, { cle })) + (await appliquerEspeces(db, { cle }));
 }
 
 questions.post("/questions/:id/reponse", async (c) => {

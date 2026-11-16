@@ -1,6 +1,7 @@
 // Salons, préparations (déduites) et objectifs.
 import { Hono } from "hono";
 import { Env, STOCK_SQL, erreur, texte, entier, corps } from "./outils";
+import { recommander } from "./bilan";
 
 export const salons = new Hono<{ Bindings: Env }>();
 
@@ -175,15 +176,17 @@ export async function lireObjectifs(db: D1Database, prepId: number) {
     db.prepare(`SELECT salon_id, piece_id, retenu, conseille, calcul FROM objectif WHERE salon_id IN (${ph})`).bind(...prep.salon_ids),
   ]);
   const obj = new Map((objectifs.results as { salon_id: number; piece_id: number; retenu: number; conseille: number | null }[]).map((o) => [`${o.salon_id}:${o.piece_id}`, o]));
+  const reco = await recommander(db, salonsPrep);
   const lignes = (articles.results as { id: number; nom: string; famille_id: number; famille: string; stock: number }[]).map((a) => {
     const par_salon = salonsPrep.map((s) => {
       const o = obj.get(`${s.id}:${a.id}`);
-      return { salon_id: s.id, retenu: o?.retenu ?? null, conseille: o?.conseille ?? null };
+      const r = reco.conseils.get(`${s.id}:${a.id}`);
+      return { salon_id: s.id, retenu: o?.retenu ?? null, conseille: r?.conseille ?? null, calcul: r?.calcul ?? null };
     });
     const retenus = par_salon.filter((x) => x.retenu !== null).map((x) => x.retenu!);
     return { ...a, par_salon, a_avoir: aAvoir(retenus, etat.reglages) };
   });
-  return { preparation: prep, salons: salonsPrep, reglages: etat.reglages, articles: lignes };
+  return { preparation: prep, salons: salonsPrep, reglages: etat.reglages, articles: lignes, tampons_prevus: reco.tampons_prevus, confiance: reco.confiance };
 }
 
 salons.get("/preparations/:id/objectifs", async (c) => c.json(await lireObjectifs(c.env.DB, entier(c.req.param("id"), "id", 1))));
@@ -207,4 +210,21 @@ salons.put("/objectifs", async (c) => {
     "INSERT INTO objectif (salon_id, piece_id, retenu) VALUES (?, ?, ?) ON CONFLICT (salon_id, piece_id) DO UPDATE SET retenu = excluded.retenu",
   ).bind(salon_id, piece_id, retenu).run();
   return c.json({ ok: true });
+});
+
+// Plusieurs objectifs d'un coup (« Prendre les conseillés »).
+salons.put("/objectifs/lot", async (c) => {
+  const b = await corps(c);
+  if (!Array.isArray(b.lignes) || !b.lignes.length) erreur("Aucun objectif.");
+  const lignes = (b.lignes as Record<string, unknown>[]).map((l) => ({
+    salon_id: entier(l?.salon_id, "salon", 1), piece_id: entier(l?.piece_id, "article", 1), retenu: entier(l?.retenu, "objectif", 0),
+  }));
+  const db = c.env.DB;
+  const ids = [...new Set(lignes.map((l) => l.piece_id))];
+  const { results } = await db.prepare(`SELECT id FROM piece WHERE niveau = 'a_vendre' AND suivi = 'quantite' AND id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all();
+  if (results.length !== ids.length) erreur("Seuls les articles à vendre comptés à la pièce ont un objectif.");
+  await db.batch(lignes.map((l) => db.prepare(
+    "INSERT INTO objectif (salon_id, piece_id, retenu) VALUES (?, ?, ?) ON CONFLICT (salon_id, piece_id) DO UPDATE SET retenu = excluded.retenu",
+  ).bind(l.salon_id, l.piece_id, l.retenu)));
+  return c.json({ ok: true, n: lignes.length });
 });

@@ -26,27 +26,11 @@ async function questionUnique(db: D1Database, type: string, cleDetail: string, v
   if (!existe) await db.prepare("INSERT INTO question (type, piece_id, detail) VALUES (?, ?, ?)").bind(type, piece_id, JSON.stringify(detail)).run();
 }
 
-/**
- * Applique au stock les lignes de vente pas encore appliquées (filtrées par vente ou par nom SumUp).
- * Crée une question « vente impossible » si une pièce passe sous zéro.
- */
-export async function appliquerVentes(db: D1Database, filtre: { vente_id?: number; cle?: string }) {
-  const cond = filtre.vente_id !== undefined ? "vl.vente_id = ?" : "vl.cle = ?";
-  const val = filtre.vente_id ?? filtre.cle;
-  const { results } = await db.prepare(
-    `SELECT vl.id AS ligne_id, vl.nom, vl.quantite * cp.quantite AS q, v.date, cp.piece_id, p.suivi,
-            (SELECT MIN(m.date) FROM mouvement m WHERE m.piece_id = cp.piece_id AND m.motif <> 'vente') AS debut_suivi
-     FROM vente_ligne vl
-     JOIN vente v ON v.id = vl.vente_id
-     JOIN correspondance c ON c.cle = vl.cle AND c.ne_pas_suivre = 0
-     JOIN correspondance_piece cp ON cp.cle = c.cle
-     JOIN piece p ON p.id = cp.piece_id
-     WHERE ${cond}
-       AND NOT EXISTS (SELECT 1 FROM mouvement m2 WHERE m2.source_type = 'vente_ligne' AND m2.source_id = vl.id AND m2.piece_id = cp.piece_id)
-     ORDER BY v.date`,
-  ).bind(val).all<{ ligne_id: number; nom: string; q: number; date: string; piece_id: number; suivi: string; debut_suivi: string | null }>();
+type LigneAAppliquer = { source_id: number; q: number; date: string; piece_id: number; suivi: string; debut_suivi: string | null };
 
-  const aAppliquer = results.filter((r) => r.suivi === "quantite" && r.debut_suivi !== null && r.date > r.debut_suivi && r.q > 0);
+/** Écrit les mouvements de vente (carte ou espèces) et pose la question « vente impossible » si une pièce passe sous zéro. */
+async function ecrireVentes(db: D1Database, lignes: LigneAAppliquer[], motif: "vente" | "vente_especes", source_type: "vente_ligne" | "vente_especes") {
+  const aAppliquer = lignes.filter((r) => r.suivi === "quantite" && r.debut_suivi !== null && r.date > r.debut_suivi && r.q > 0);
   if (!aAppliquer.length) return 0;
   const touchees = new Map<number, number>();
   for (const r of aAppliquer) touchees.set(r.piece_id, (touchees.get(r.piece_id) ?? 0) + r.q);
@@ -59,8 +43,8 @@ export async function appliquerVentes(db: D1Database, filtre: { vente_id?: numbe
   const stockAvant = new Map(avant.map((x) => [x.piece_id, x.stock]));
 
   await db.batch(aAppliquer.map((r) => db.prepare(
-    "INSERT INTO mouvement (piece_id, quantite, motif, date, source_type, source_id) VALUES (?, ?, 'vente', ?, 'vente_ligne', ?)",
-  ).bind(r.piece_id, -r.q, r.date, r.ligne_id)));
+    "INSERT INTO mouvement (piece_id, quantite, motif, date, source_type, source_id) VALUES (?, ?, ?, ?, ?, ?)",
+  ).bind(r.piece_id, -r.q, motif, r.date, source_type, r.source_id)));
 
   for (const [pid, vendus] of touchees) {
     const s0 = stockAvant.get(pid) ?? 0;
@@ -77,6 +61,43 @@ export async function appliquerVentes(db: D1Database, filtre: { vente_id?: numbe
     }
   }
   return aAppliquer.length;
+}
+
+const DEBUT_SUIVI = "(SELECT MIN(m.date) FROM mouvement m WHERE m.piece_id = cp.piece_id AND m.motif NOT IN ('vente', 'vente_especes'))";
+
+/** Applique au stock les ventes carte pas encore appliquées (filtrées par vente ou par nom de caisse). */
+export async function appliquerVentes(db: D1Database, filtre: { vente_id?: number; cle?: string }) {
+  const cond = filtre.vente_id !== undefined ? "vl.vente_id = ?" : "vl.cle = ?";
+  const { results } = await db.prepare(
+    `SELECT vl.id AS source_id, vl.quantite * cp.quantite AS q, v.date, cp.piece_id, p.suivi, ${DEBUT_SUIVI} AS debut_suivi
+     FROM vente_ligne vl
+     JOIN vente v ON v.id = vl.vente_id
+     JOIN correspondance c ON c.cle = vl.cle AND c.ne_pas_suivre = 0
+     JOIN correspondance_piece cp ON cp.cle = c.cle
+     JOIN piece p ON p.id = cp.piece_id
+     WHERE ${cond}
+       AND NOT EXISTS (SELECT 1 FROM mouvement m2 WHERE m2.source_type = 'vente_ligne' AND m2.source_id = vl.id AND m2.piece_id = cp.piece_id)
+     ORDER BY v.date`,
+  ).bind(filtre.vente_id ?? filtre.cle).all<LigneAAppliquer>();
+  return ecrireVentes(db, results, "vente", "vente_ligne");
+}
+
+/** Applique au stock les ventes en espèces saisies au bilan (datées du dernier jour du salon). */
+export async function appliquerEspeces(db: D1Database, filtre: { salon_id?: number; cle?: string }) {
+  const cond = filtre.salon_id !== undefined ? "ve.salon_id = ?" : "ve.cle = ?";
+  const { results } = await db.prepare(
+    `SELECT ve.id AS source_id, ve.quantite * cp.quantite AS q,
+            date(s.date_debut, '+' || (s.nb_jours - 1) || ' days') || 'T18:00:00.000Z' AS date,
+            cp.piece_id, p.suivi, ${DEBUT_SUIVI} AS debut_suivi
+     FROM vente_especes ve
+     JOIN salon s ON s.id = ve.salon_id
+     JOIN correspondance c ON c.cle = ve.cle AND c.ne_pas_suivre = 0
+     JOIN correspondance_piece cp ON cp.cle = c.cle
+     JOIN piece p ON p.id = cp.piece_id
+     WHERE ${cond}
+       AND NOT EXISTS (SELECT 1 FROM mouvement m2 WHERE m2.source_type = 'vente_especes' AND m2.source_id = ve.id AND m2.piece_id = cp.piece_id)`,
+  ).bind(filtre.salon_id ?? filtre.cle).all<LigneAAppliquer>();
+  return ecrireVentes(db, results, "vente_especes", "vente_especes");
 }
 
 async function enregistrerVente(db: D1Database, item: Item, produits: Produit[]) {

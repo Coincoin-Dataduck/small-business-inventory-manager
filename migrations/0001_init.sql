@@ -133,12 +133,14 @@ CREATE TABLE bilan_article (
   PRIMARY KEY (salon_id, piece_id)
 );
 
+-- Ventes en espèces recopiées de la table manuscrite, par nom de caisse (comme SumUp) :
+-- elles passent par les mêmes correspondances que les ventes carte.
 CREATE TABLE vente_especes (
   id       INTEGER PRIMARY KEY,
   salon_id INTEGER NOT NULL REFERENCES salon(id) ON DELETE CASCADE,
-  piece_id INTEGER NOT NULL REFERENCES piece(id),
-  quantite INTEGER NOT NULL CHECK (quantite >= 0),
-  UNIQUE (salon_id, piece_id)
+  cle      TEXT NOT NULL REFERENCES correspondance(cle),
+  quantite INTEGER NOT NULL CHECK (quantite > 0),
+  UNIQUE (salon_id, cle)
 );
 
 -- ───────────── Ventes SumUp ─────────────
@@ -228,4 +230,5 @@ INSERT INTO reglage (cle, valeur) VALUES
   ('marge_unique', '1'),
   ('temps_travail', '1'),
   ('controle_tampons', '1'),
-  ('import_depuis', '2025-12-01');   -- début de l'historique SumUp à importer
+  ('import_depuis', '2025-12-01'),    -- début de l'historique SumUp à importer
+  ('tampons_min_ratio', '50');        -- en dessous, un salon est trop petit pour fournir un ratio « pour 100 tampons »

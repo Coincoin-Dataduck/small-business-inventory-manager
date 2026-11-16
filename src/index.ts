@@ -5,6 +5,7 @@ import { recettes } from "./recettes";
 import { salons } from "./salons";
 import { atelier } from "./atelier";
 import { questions } from "./questions";
+import { bilan } from "./bilan";
 import { importer } from "./sumup";
 const app = new Hono<{ Bindings: Env }>().basePath("/api");
 
@@ -132,6 +133,7 @@ app.route("/", recettes);
 app.route("/", salons);
 app.route("/", atelier);
 app.route("/", questions);
+app.route("/", bilan);
 
 app.onError((e, c) => {
   if (e instanceof HTTPException) return c.json({ erreur: e.message }, e.status);

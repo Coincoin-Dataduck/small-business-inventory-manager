@@ -69,6 +69,7 @@ function pageCourante() {
   const [id, ...params] = location.hash.replace("#", "").split("/");
   etat.params = params;
   if (id === "objectifs" && params[0]) return "objectifs";
+  if (id === "bilan" && params[0]) return "bilan";
   return PAGES.some((p) => p.id === id && !p.bientot) ? id : "stock";
 }
 
@@ -77,7 +78,7 @@ function dessinerMenu() {
   nav.replaceChildren(
     ...PAGES.map((p) =>
       h("button", {
-        "aria-current": etat.page === p.id || (etat.page === "objectifs" && p.id === "salons") ? "page" : null,
+        "aria-current": etat.page === p.id || ((etat.page === "objectifs" || etat.page === "bilan") && p.id === "salons") ? "page" : null,
         disabled: p.bientot,
         title: p.bientot ? "Pas encore construit" : null,
         onclick: () => { location.hash = p.id; },
@@ -98,6 +99,7 @@ async function afficher() {
     if (etat.page === "salons") await pageSalons();
     if (etat.page === "questions") await pageQuestions();
     if (etat.page === "objectifs") await pageObjectifs(Number(etat.params[0]));
+    if (etat.page === "bilan") await pageBilan(Number(etat.params[0]));
   });
 }
 
@@ -772,7 +774,7 @@ function dureeTexte(min) {
 
 // ───────────── Salons ─────────────
 async function pageSalons() {
-  etat.salons = await api("/salons");
+  [etat.salons, etat.passes] = await Promise.all([api("/salons"), api("/salons-passes")]);
   dessinerSalons();
 }
 
@@ -856,7 +858,7 @@ function dessinerSalons() {
     const phases = [
       { label: "Objectifs", fait: prep.nb_objectifs > 0, quand: prep.nb_objectifs ? `${prep.nb_objectifs} fixé(s)` : "à fixer" },
       { label: "Comptage avant", fait: !!prep.comptage_avant, quand: prep.comptage_avant ? "fait le " + fmtDate(prep.comptage_avant.slice(0, 10)) : "juste avant de charger le stand" },
-      { label: "Bilan", fait: false, quand: "après le salon (avec l'import des ventes)" },
+      { label: "Bilan", fait: false, quand: "après le salon : espèces à recopier, « mal exposé » à cocher" },
     ];
     preparation = h("section", { class: "carte" },
       h("h2", {}, "Préparation en cours : " + nomPreparation(prep, d.salons)),
@@ -872,16 +874,24 @@ function dessinerSalons() {
     h("h2", {}, "Salons passés"),
     passes.length
       ? h("table", { class: "tbl" },
-          h("thead", {}, h("tr", {}, ["Salon", "Type", "Jours", "Fréquentation", ""].map((t, i) => h("th", { class: i === 2 || i === 3 ? "num" : null }, t)))),
+          h("thead", {}, h("tr", {}, ["Salon", "Type", "Jours", "Fréquentation", "Ventes carte", "Tampons", "Tampons / 1 000 vis.", ""].map((t, i) => h("th", { class: i >= 2 && i <= 6 ? "num" : null }, t)))),
           h("tbody", {}, passes.map((s) => etat.salonEdition === s.id
-            ? h("tr", {}, h("td", { colspan: "5" }, formulaireSalon(s)))
+            ? h("tr", {}, h("td", { colspan: "8" }, formulaireSalon(s)))
             : h("tr", {},
                 h("td", {}, h("strong", {}, s.nom), h("div", { class: "note" }, datesSalon(s))),
                 h("td", {}, s.type ?? ""), h("td", { class: "num" }, s.nb_jours),
                 h("td", { class: "num" }, s.frequentation ? s.frequentation.toLocaleString("fr-FR") : "—"),
-                h("td", {}, h("div", { class: "actions-ligne" }, h("button", { class: "btn-petit", disabled: !!etat.salonEdition, onclick: () => { etat.salonEdition = s.id; dessinerSalons(); } }, "Modifier")))))))
+                ...(() => { const st = etat.passes.find((x) => x.salon_id === s.id); return [
+                  h("td", { class: "num" }, st ? euros(st.carte_suivi) : "—"),
+                  h("td", { class: "num" }, st?.tampons || "—"),
+                  h("td", { class: "num", style: "font-weight:700" }, st?.pour_1000 == null ? "—" : String(st.pour_1000).replace(".", ",")),
+                ]; })(),
+                h("td", {}, h("div", { class: "actions-ligne" },
+                  etat.passes.find((x) => x.salon_id === s.id && !x.especes_saisies) ? h("span", { class: "note", style: "font-size:12px" }, "espèces à saisir") : null,
+                  h("button", { class: "btn-petit", onclick: () => { location.hash = "bilan/" + s.id; } }, "Bilan"),
+                  h("button", { class: "btn-petit", disabled: !!etat.salonEdition, onclick: () => { etat.salonEdition = s.id; dessinerSalons(); } }, "Modifier")))))))
       : h("div", { class: "vide" }, "Aucun. Les salons passés servent aux recommandations : saisissez ceux de l'historique (dates, fréquentation)."),
-    h("div", { class: "note", style: "padding:0 14px 14px;font-size:13px" }, "Ventes carte, tampons et bilan arriveront avec l'import SumUp."),
+    h("div", { class: "note", style: "padding:8px 14px 14px;font-size:13px" }, "Ventes carte : seulement les noms de caisse suivis (les ventes de Lucile et autres « non suivis » sont écartées). Tampons = unités + lots + collections, carte et espèces saisies."),
   );
 
   page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, preparation, timeline, tablePasses));
@@ -911,6 +921,30 @@ function dessinerObjectifs() {
     dessinerObjectifs();
   });
 
+  const tamponsPrevus = h("section", { class: "carte" },
+    h("h2", {}, "1. Combien de tampons pour chaque salon ?"),
+    h("p", { class: "note", style: "margin:0;padding:0 14px 8px" }, "Les tampons servent de thermomètre : leur présentoir est impossible à manquer, donc leurs ventes reflètent le passage réel devant le stand. On les prévoit à partir du salon passé le plus comparable."),
+    h("table", { class: "tbl" }, h("tbody", {}, d.salons.map((s) => {
+      const tp = d.tampons_prevus.find((x) => x.salon_id === s.id);
+      return h("tr", {},
+        h("td", { style: "font-weight:600" }, s.nom),
+        h("td", { class: "note" }, tp.calcul),
+        h("td", { class: "num", style: "width:220px" }, h("div", { class: "pas", style: "justify-content:flex-end" },
+          h("input", { class: "compte", type: "number", min: "0", step: "1", value: tp.manuel ? String(tp.tampons) : "", placeholder: tp.tampons === null ? "?" : String(tp.tampons), "aria-label": "Tampons prévus pour " + s.nom,
+            onchange: (e) => tenter(async () => {
+              await api("/salons/" + s.id, { method: "PATCH", body: { tampons_prevus: e.target.value === "" ? null : Number(e.target.value) } });
+              await pageObjectifs(d.preparation.id);
+            }) }),
+          h("span", { class: "note", style: "font-size:12px" }, tp.manuel ? "(vide = calcul)" : "tampons"))));
+    }))));
+  const conseilles = d.articles.flatMap((a) => a.par_salon.filter((s) => s.conseille !== null).map((s) => ({ salon_id: s.salon_id, piece_id: a.id, retenu: s.conseille })));
+  const prendre = conseilles.length ? h("button", { class: "btn-sec", onclick: () => tenter(async () => {
+    if (!confirm(`Remplacer les objectifs par les ${conseilles.length} valeurs conseillées ? Les articles sans conseil gardent leur objectif.`)) return;
+    await api("/objectifs/lot", { method: "PUT", body: { lignes: conseilles } });
+    flash("Objectifs conseillés repris : ajustez avec − / + si besoin.");
+    await pageObjectifs(d.preparation.id);
+  }) }, "Prendre les objectifs conseillés") : null;
+
   const familles = [...new Set(d.articles.map((a) => a.famille))];
   const cartes = familles.map((f) => h("section", { class: "carte" },
     h("h2", {}, f),
@@ -918,20 +952,24 @@ function dessinerObjectifs() {
       h("thead", {}, h("tr", {}, h("th", {}, "Article"), h("th", { class: "num" }, "Prêts"),
         d.salons.map((s) => h("th", {}, s.nom)), h("th", { class: "num" }, `À avoir le ${fmtDate(premier.date_debut)}`))),
       h("tbody", {}, d.articles.filter((a) => a.famille === f).map((a) => h("tr", {},
-        h("td", { style: "font-weight:600" }, a.nom),
+        h("td", {}, h("strong", {}, a.nom), a.par_salon[0]?.calcul ? h("div", { class: "note", style: "font-size:12px;max-width:340px" }, a.par_salon[0].calcul) : null),
         h("td", { class: "num" }, a.stock),
         a.par_salon.map((s) => h("td", {}, h("div", { class: "pas" },
           h("button", { class: "btn-petit", "aria-label": "Moins", disabled: !s.retenu, onclick: () => changer(a, s, Math.max(0, (s.retenu ?? 0) - 1)) }, "−"),
           h("input", { class: "compte", type: "number", min: "0", step: "1", value: s.retenu ?? "", placeholder: "—", "aria-label": `Objectif ${a.nom}`,
             onchange: (e) => changer(a, s, e.target.value === "" ? null : Number(e.target.value)) }),
           h("button", { class: "btn-petit", "aria-label": "Plus", onclick: () => changer(a, s, (s.retenu ?? 0) + 1) }, "+"),
-          h("span", { class: "note", style: "font-size:12px" }, s.conseille === null ? "" : "conseillé " + s.conseille)))),
+          h("span", { class: "note", style: "font-size:12px", title: s.calcul ?? "" }, s.conseille === null ? "" : "conseillé " + s.conseille)))),
         h("td", { class: "num qte" }, a.a_avoir || "—")))))));
 
   page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" },
     h("p", { class: "note", style: "margin:0" },
       `Fixez combien vous voulez vendre de chaque article à chaque salon. « À avoir » = la somme + ${marge} % de marge${d.reglages.marge_unique ? ", appliquée une seule fois pour la préparation" : ""}. ` +
-      "Les objectifs conseillés (calculés à partir des tampons et des salons passés) arriveront avec l'import des ventes SumUp ; en attendant, vous les fixez à la main."),
+      "Conseillé = tampons prévus × ventes pour 100 tampons au meilleur salon passé × part du modèle. L'outil conseille, vous fixez."),
+    h("div", { class: "note", style: "font-size:13px" }, "Confiance : " + d.confiance + "."),
+    tamponsPrevus,
+    h("h2", { style: "margin:0;font-size:18px" }, "2. Les articles, à partir des tampons"),
+    prendre,
     d.articles.length ? cartes : h("div", { class: "carte" }, h("div", { class: "vide" }, "Aucun article à vendre. Créez-les dans Réglages.")),
     h("div", { class: "barre-comptage" }, h("button", { class: "btn", onclick: () => { location.hash = "atelier"; } }, "Voir ce qu'il reste à faire")),
   ));
@@ -1077,6 +1115,13 @@ function carteQuestion(q) {
     await pageQuestions();
   });
 
+  if (q.type === "especes_a_saisir") {
+    return h("section", { class: "question" },
+      h("strong", {}, `Espèces de « ${d.nom} » à recopier`),
+      h("div", {}, "Recopiez la table manuscrite dans le bilan du salon : c'est ce qui retire les ventes en espèces du stock."),
+      h("div", {}, h("button", { class: "btn", onclick: () => { location.hash = "bilan/" + d.salon_id; } }, "Ouvrir le bilan")));
+  }
+
   if (q.type === "vente_impossible") {
     const input = h("input", { type: "number", min: "0", step: "1", class: "compte", placeholder: "ex. 4", "aria-label": "Nombre réel" });
     return h("section", { class: "question" },
@@ -1179,6 +1224,78 @@ function sauverCorrespondance(corps) {
     flash(`Enregistré : ${r.ventes_appliquees} vente(s) réappliquée(s) au stock.`);
     await pageReglages();
   });
+}
+
+// ───────────── Bilan d'un salon ─────────────
+const euros = (x) => (Math.round(x * 100) / 100).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: x % 1 ? 2 : 0 });
+
+async function pageBilan(id) {
+  etat.bilan = await api(`/salons/${id}/bilan`);
+  // Options de couleur ignorées : une case par nom de caisse, enregistrée sur la variante « sans option » (ou la première).
+  const groupes = new Map();
+  for (const c of etat.bilan.caisse) {
+    const nom = c.nom_affiche.split(" · ")[0];
+    const g = groupes.get(nom) ?? groupes.set(nom, { nom, cle: c.cle, tampons: c.tampons, especes: 0 }).get(nom);
+    if (!c.nom_affiche.includes(" · ")) { g.cle = c.cle; g.tampons = c.tampons; }
+    g.especes += c.especes;
+  }
+  etat.bilan.groupes = [...groupes.values()];
+  etat.bilanEspeces = { montant: etat.bilan.especes_montant ?? "", q: Object.fromEntries(etat.bilan.groupes.filter((g) => g.especes).map((g) => [g.cle, String(g.especes)])), filtre: "" };
+  dessinerBilan();
+}
+
+function dessinerBilan() {
+  const d = etat.bilan, e = etat.bilanEspeces;
+  entete("Bilan · " + d.salon.nom, h("button", { class: "btn-sec", onclick: () => { location.hash = "salons"; } }, "← Salons"));
+  const page = document.getElementById("page");
+
+  const tuile = (titre, valeur, sous) => h("div", { class: "tuile" }, h("span", { class: "note" }, titre), h("strong", {}, valeur), sous ? h("span", { class: "note", style: "font-size:13px" }, sous) : null);
+  const autres = d.jours.reduce((t, j) => t + j.autres, 0), aRelier = d.jours.reduce((t, j) => t + j.a_relier, 0);
+  const tuiles = h("div", { class: "tuiles" },
+    tuile("Ventes carte", euros(d.carte_suivi), d.jours.map((j) => `${euros(j.suivi)} le ${fmtDate(j.jour)}`).join(" · ") || "aucune"),
+    tuile("Espèces", d.especes_montant === null ? "à saisir" : euros(d.especes_montant), "absent de SumUp, à recopier ci-dessous"),
+    tuile("Tampons (thermomètre)", String(d.tampons.total), d.tampons.pour_1000 === null ? "fréquentation inconnue" : `${String(d.tampons.pour_1000).replace(".", ",")} pour 1 000 visiteurs` + (d.tampons.especes ? ` · dont ${d.tampons.especes} en espèces` : "")),
+    tuile("Fréquentation", d.salon.frequentation ? "~" + d.salon.frequentation.toLocaleString("fr-FR") : "?", [d.salon.type, `${d.salon.nb_jours} jour(s)`].filter(Boolean).join(" · ")));
+
+  const alertes = [];
+  if (aRelier) alertes.push(h("div", { class: "question" }, h("strong", {}, `${euros(aRelier)} de ventes avec des noms pas encore reliés`),
+    h("div", {}, "Ils ne comptent ni dans les articles ni dans les tampons. ", h("a", { href: "#questions" }, "Les relier dans Questions"), ".")));
+  if (autres) alertes.push(h("div", { class: "note" }, `${euros(autres)} de ventes « non suivies » (ex. articles de Lucile) écartées du bilan.`));
+
+  const articles = h("section", { class: "carte" }, h("h2", {}, "Par article"),
+    d.articles.length ? h("table", { class: "tbl" },
+      h("thead", {}, h("tr", {}, ["Article", "Vendus", "dont espèces", "Pour 100 tampons", "Mal exposé ou épuisé ?"].map((t, i) => h("th", { class: i && i < 4 ? "num" : null }, t)))),
+      h("tbody", {}, d.articles.map((a) => h("tr", {},
+        h("td", {}, h("strong", {}, a.nom), h("div", { class: "note", style: "font-size:12px" }, a.famille)),
+        h("td", { class: "num qte" }, a.vendus), h("td", { class: "num" }, a.especes || ""),
+        h("td", { class: "num" }, a.pour_100 === null ? "—" : String(a.pour_100).replace(".", ",")),
+        h("td", {}, h("button", { class: "pastille-filtre", "aria-pressed": String(a.mal_expose), onclick: () => tenter(async () => {
+          await api(`/salons/${d.salon.id}/mal-expose`, { method: "PUT", body: { piece_id: a.piece_id, mal_expose: !a.mal_expose } });
+          a.mal_expose = !a.mal_expose; dessinerBilan();
+        }) }, a.mal_expose ? "Oui · ne compte pas" : "Non")))))) : h("div", { class: "vide" }, "Aucune vente d'article reliée pour ce salon."),
+    h("p", { class: "note", style: "margin:0;padding:8px 14px 14px;font-size:13px" }, "Les articles marqués « ne compte pas » sont écartés des recommandations des prochains salons (mal mis en avant, ou épuisés en cours de salon)."));
+
+  const filtre = e.filtre.trim().toLowerCase();
+  const lignesCaisse = d.groupes.filter((c) => !filtre || c.nom.toLowerCase().includes(filtre) || e.q[c.cle]);
+  const especes = h("section", { class: "carte" }, h("h2", {}, "Espèces (table manuscrite)"),
+    h("div", { class: "formulaire" },
+      h("label", { for: "esp-montant" }, "Total des espèces (€)", h("input", { id: "esp-montant", type: "number", min: "0", step: "0.01", value: String(e.montant), style: "width:140px", oninput: (ev) => { e.montant = ev.target.value; } })),
+      h("label", { for: "esp-filtre" }, "Chercher un nom de caisse", h("input", { id: "esp-filtre", value: e.filtre, placeholder: "ex. tampon", oninput: (ev) => { e.filtre = ev.target.value; dessinerBilan(); const el = document.getElementById("esp-filtre"); el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }))),
+    h("table", { class: "tbl" }, h("tbody", {}, lignesCaisse.map((c) => h("tr", {},
+      h("td", {}, c.nom, c.tampons ? h("span", { class: "note" }, ` · ${c.tampons} tampon(s)`) : null),
+      h("td", { class: "num", style: "width:120px" }, h("input", { class: "compte", type: "number", min: "0", step: "1", value: e.q[c.cle] ?? "", placeholder: "0", "aria-label": "Vendus en espèces : " + c.nom,
+        oninput: (ev) => { e.q[c.cle] = ev.target.value; } })))))),
+    h("div", { class: "barre-comptage", style: "padding:14px" },
+      h("span", { class: "note" }, "Les quantités en espèces retirent les pièces du stock, comme les ventes carte."),
+      h("button", { class: "btn", onclick: () => tenter(async () => {
+        const lignes = Object.entries(e.q).filter(([, v]) => v !== "" && Number(v) > 0).map(([cle, v]) => ({ cle, quantite: Number(v) }));
+        if (lignes.some((l) => !Number.isInteger(l.quantite))) throw new Error("Les quantités doivent être des nombres entiers.");
+        const r = await api(`/salons/${d.salon.id}/especes`, { method: "PUT", body: { montant: e.montant === "" ? null : Number(e.montant), lignes } });
+        flash(`Espèces enregistrées (${lignes.length} ligne(s), ${r.appliquees} retrait(s) de stock).`);
+        await pageBilan(d.salon.id);
+      }) }, "Enregistrer les espèces")));
+
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, tuiles, ...alertes, articles, especes));
 }
 
 window.addEventListener("hashchange", () => {

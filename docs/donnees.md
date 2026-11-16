@@ -58,7 +58,7 @@ Les **préparations ne sont pas stockées** : elles se déduisent des dates et d
 **comptage_ligne** — pièce, attendu, compté (→ mouvement de la différence).
 
 **bilan_article** — salon, article : « mal exposé ou épuisé » (exclut de la recommandation) ; 
-**vente_especes** — salon, article, quantité : recopié de la table manuscrite au bilan (→ mouvement `vente_especes`).
+**vente_especes** — salon, **nom de caisse** (clé de correspondance), quantité : recopié de la table manuscrite au bilan. Passe par les mêmes correspondances que les ventes carte (un « Tampon lot » en espèces retire son emballage et compte 4 tampons) → mouvements `vente_especes`.
 
 ## Achats
 **commande** — pièce, quantité, taille de lot, date, `commande` → `recu` (→ mouvement de réception).
