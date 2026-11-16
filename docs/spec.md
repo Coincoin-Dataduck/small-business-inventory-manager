@@ -61,7 +61,7 @@ Validée question par question avec Clément (novembre 2026). Les « ? » sont d
 | Prints (11 dessins × A5 / A4 / A3) | imprimer : 1 feuille print A3 → 1 A3 / 2 A4 / 4 A5 (dessins mélangés, jamais de perte) → découper/emballer : + 1 carton et 1 pochette du format |
 | Mini-presses (5 modèles) | peindre+découper : 1 plaque MDF A3 d'une couleur → 23 planchettes (2 par presse, une plaque = un seul modèle) ; buvard : 1 feuille Canson → 3 bandes ; carton : 1 planche de carton (récup) → ? cartons ; monter : 2 planchettes + 3 bandes + 2 cartons + 2 élastiques |
 | Tampons (25 motifs) | graver : 1 feuille gomme A4 → ~150 gommes ; coller : 1 gomme + 1 cube en bois (acheté) |
-| Tampon lot | 4 tampons + 1 emballage + 1/45 feuille de stickers ronds (imprimés à la demande) |
+| Tampon lot | composé au moment de la vente (pas de stock de lots tout faits, validé) : 4 tampons + 1 emballage + 1/45 feuille de stickers ronds (imprimés à la demande) |
 | Collection | 20 tampons (emballage non suivi) |
 | Encreur VersaFine petit format | acheté-revendu, couleurs non suivies |
 | Kit Maison / Kit Serre | découper : 1 contreplaqué A3 → 1 jeu de 4 planchettes ; livret : 1 feuille kraft A4 ; pochette : 1 feuille A3 (kraft ?) ; lampe : 1 boîtier + 1 pile CR2032 + 1 mini LED ; assembler + 1/45 feuille de stickers |
@@ -91,7 +91,6 @@ Encre d'imprimante (EcoTank ET8550), encre de linogravure, emballage de la Colle
 ## 8. Points ouverts
 - Rendements : planche de carton → combien de cartons ? cartonnettes par feuille ?
 - Pochette du kit : kraft ou autre papier ?
-- Tampon lot et Collection : composés au moment de la vente (pas de stock de lots tout faits) — interprétation de la réponse « non », à confirmer.
 - Prints : à « C'est fait », on indique quels dessins sont sortis de la feuille (validé).
 - Temps réels par étape ; délais fournisseurs.
 - Test API SumUp (16/11/2026, 100 transactions, caisse uniquement) : détail des articles **oui** en caisse (transaction complète et reçu identiques) ; **pas d'identifiant** d'article ; catalogue non accessible par l'API (404). Restent inconnus : commandes en ligne, remises, remboursements.
