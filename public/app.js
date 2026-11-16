@@ -164,13 +164,23 @@ function dessinerStock() {
     h("section", { class: "carte" },
       h("h2", {}, f.nom),
       f.pieces.length
-        ? h("table", { class: "tbl" }, h("tbody", {}, f.pieces.map(ligneStock)))
+        ? h("table", { class: "tbl tbl-stock" },
+            h("colgroup", {}, h("col", { class: "c-badge" }), h("col", {}), h("col", { class: "c-qte" }), h("col", { class: "c-note" }), h("col", { class: "c-action" })),
+            h("tbody", {}, lignesFamille(f.pieces)))
         : h("div", { class: "vide" }, "Rien dans cette famille pour l'instant."),
     ),
   );
 
   const barre = enComptage ? barreComptage() : null;
   page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, filtres, legende, ...cartes, barre));
+}
+
+// Dans une famille : les articles à vendre d'abord, puis les fournitures (maison, achetées, récup).
+function lignesFamille(pieces) {
+  const vente = pieces.filter((p) => p.niveau === "a_vendre"), fournitures = pieces.filter((p) => p.niveau !== "a_vendre");
+  if (!vente.length || !fournitures.length) return pieces.map(ligneStock);
+  const titre = (t) => h("tr", { class: "groupe" }, h("td", { colspan: 5 }, t));
+  return [titre("À vendre"), ...vente.map(ligneStock), titre("Fournitures"), ...fournitures.map(ligneStock)];
 }
 
 function noteStock(p) {
@@ -190,7 +200,7 @@ function ligneStock(p) {
   if (etat.comptage !== null && comptable) {
     const saisi = etat.comptage[p.id];
     const ecart = saisi === undefined || saisi === "" ? null : Number(saisi) - p.stock;
-    const ecartEl = h("span", { class: "ecart" }, ecart ? signe(ecart) : "");
+    const ecartEl = h("span", { class: "ecart" + (ecart > 0 ? " plus" : "") }, ecart ? signe(ecart) : "");
     action = h("div", { class: "actions-ligne" },
       h("label", { class: "sr", for: "c" + p.id }, "Compté pour " + p.nom),
       h("input", {
@@ -200,6 +210,7 @@ function ligneStock(p) {
           etat.comptage[p.id] = e.target.value;
           const d = e.target.value === "" ? 0 : Number(e.target.value) - p.stock;
           ecartEl.textContent = d ? signe(d) : "";
+          ecartEl.className = "ecart" + (d > 0 ? " plus" : "");
           majBarreComptage();
         },
       }),
@@ -238,7 +249,7 @@ function ligneStock(p) {
   return h("tr", {},
     h("td", { class: "col-badge" }, h("span", { class: "badge badge-" + p.niveau }, NIVEAUX[p.niveau])),
     h("td", { style: "font-weight:600" }, p.nom),
-    h("td", { class: "num qte" }, qte),
+    h("td", { class: "num qte" + (comptable && p.stock < 0 ? " neg" : comptable && p.stock === 0 ? " zero" : "") }, qte),
     h("td", { class: "note" }, noteStock(p)),
     h("td", { class: "col-action" }, action),
   );
@@ -1569,53 +1580,88 @@ function dessinerAccueil() {
   const avertDe = (j) => d.avertissements.filter((a) => a.type === j.type && (a.id === null || a.id === j.id));
   const jAvant = joursEntre(d.aujourdhui, premier.date_debut);
 
-  const frise = h("div", { class: "frise" + (glisserPossible() ? " glissable" : "") });
+  // Frise en ligne de métro : une ligne, les jalons comme des stations, les étiquettes
+  // au-dessus ou en dessous (rangées calculées pour qu'elles ne se chevauchent pas).
+  const frise = h("div", { class: "metro" + (glisserPossible() ? " glissable" : "") });
+  const voie = h("div", { class: "metro-voie" });
+  const centre = (date) => pct(date) + 50 / total;
   const dateDepuis = (clientX) => {
     const r = frise.getBoundingClientRect();
     const k = Math.round(((clientX - r.left) / r.width) * total - 0.5);
     return plusJours(debut, Math.max(0, Math.min(total - 1, k)));
   };
 
-  // Graduations : une par semaine (lundi), le mois quand il change.
-  const grad = h("div", { class: "frise-axe" });
-  for (let i = 0; i < total; i++) {
-    const jour = plusJours(debut, i), dt = new Date(jour + "T00:00:00Z");
-    if (dt.getUTCDay() === 1 || i === 0) grad.append(h("span", { class: "graduation", style: `left:${pct(jour)}%` }, fmtDate(jour)));
-  }
-  frise.append(grad);
-  frise.append(h("div", { class: "aujourdhui", style: `left:${pct(d.aujourdhui) + 50 / total}%` }, h("span", {}, "aujourd'hui")));
+  voie.append(h("span", { class: "metro-ligne" }));
+  voie.append(h("span", { class: "metro-fait", style: `width:${Math.max(0, Math.min(100, centre(d.aujourdhui)))}%` }));
 
-  // Salons (fixes).
+  // Salons (fixes), hachurés.
   for (const s of d.salons) {
-    frise.append(h("div", { class: "frise-salon", style: `left:${pct(s.date_debut)}%;width:${((joursEntre(s.date_debut, s.fin) + 1) / total) * 100}%`, title: s.nom }));
-    frise.append(h("span", { class: "frise-salon-nom", style: `left:${pct(s.date_debut)}%` }, s.nom));
+    voie.append(h("div", { class: "metro-salon", title: s.nom, style: `left:${pct(s.date_debut)}%;width:${((joursEntre(s.date_debut, s.fin) + 1) / total) * 100}%` }));
   }
 
-  // Bande de fabrication, bords glissables.
+  // Fabrication : accolade sous la ligne, bords glissables.
   const fab0 = d.jalons.find((j) => j.type === "fabrication_debut"), fab1 = d.jalons.find((j) => j.type === "fabrication_fin");
-  const bande = h("div", { class: "frise-fabrication" + (avertDe(fab1).length ? " alerte" : "") + (fab1.fait ? " fait" : "") });
+  const texteFab = h("span", { class: "metro-fab-texte" });
+  const bande = h("div", { class: "metro-fab" + (avertDe(fab1).length ? " alerte" : "") }, texteFab);
   const placerBande = (a, b) => {
-    bande.style.left = pct(a) + "%";
-    bande.style.width = Math.max(0, ((joursEntre(a, b) + 1) / total) * 100) + "%";
-    bande.firstChild && (bande.firstChild.textContent = `Fabrication · ${Math.max(0, joursEntre(a, b) + 1)} jour(s)`);
+    const n = Math.max(0, joursEntre(a, b) + 1);
+    bande.style.left = centre(a) + "%";
+    bande.style.width = Math.max(0, centre(b) - centre(a)) + "%";
+    texteFab.textContent = `Fabrication · ${n} jour${n > 1 ? "s" : ""}` + (d.fabrication.travail_min ? ` · ≈ ${dureeTexte(d.fabrication.travail_min)} de travail` : "");
   };
-  bande.append(h("span", { class: "frise-fabrication-texte" }, ""));
   placerBande(fab0.date, fab1.date);
   for (const [j, cote] of [[fab0, "g"], [fab1, "d"]]) bande.append(poignee(j, cote));
-  frise.append(bande);
+  voie.append(bande);
 
-  // Jalons : rangées pour éviter que les étiquettes se chevauchent.
-  const autres = d.jalons.filter((j) => !j.type.startsWith("fabrication")).sort((a, b) => a.date.localeCompare(b.date));
-  const fins = [];
-  for (const j of autres) {
-    const x = pct(j.date);
-    let r = fins.findIndex((f) => x - f > 16);
-    if (r === -1) { r = fins.length; fins.push(-1); }
-    fins[r] = x;
-    j._rang = r;
+  // Étiquettes : jalons (hors fabrication) et noms de salons. Placement au-dessus/en dessous, par rangées.
+  const largeurPx = Math.max(680, (document.getElementById("page").clientWidth || 900) - 140);
+  const items = [
+    ...d.jalons.filter((j) => !j.type.startsWith("fabrication")).map((j) => ({ j, x: centre(j.date), titre: j.nom, sous: fmtDate(j.date) })),
+    ...d.salons.map((s) => ({ salon: s, x: pct(s.date_debut) + ((joursEntre(s.date_debut, s.fin) + 1) / total) * 50, titre: s.nom, sous: s.date_debut === s.fin ? fmtDate(s.date_debut) : `${fmtDate(s.date_debut)} → ${fmtDate(s.fin)}` })),
+  ].sort((a, b) => a.x - b.x);
+  const rangees = { h: [], b: [] };
+  for (const it of items) {
+    const w = ((Math.max(it.titre.length, it.sous.length) * 7.2 + 16) / largeurPx) * 100;
+    it.align = it.x < 7 ? "g" : it.x > 93 ? "d" : "";
+    const x0 = it.align === "g" ? it.x - 1 : it.align === "d" ? it.x - w : it.x - w / 2;
+    const x1 = x0 + w + 1;
+    for (let k = 0; ; k++) {
+      const cote = k % 2 === 0 ? "h" : "b", r = Math.floor(k / 2);
+      const occ = (rangees[cote][r] ||= []);
+      if (occ.every(([a, b]) => x1 < a || x0 > b)) { occ.push([x0, x1]); it.cote = cote; it.rang = r; break; }
+    }
   }
-  for (const j of autres) frise.append(marqueur(j));
-  frise.style.setProperty("--rangs", String(Math.max(1, fins.length)));
+  const nh = rangees.h.length, nb = rangees.b.length;
+  const HAUT0 = 30, BAS0 = 52, PAS = 40;
+  const y = nh ? HAUT0 + (nh - 1) * PAS + 40 : 24;
+  const basAjd = BAS0 + nb * PAS;
+  frise.style.setProperty("--y", y + "px");
+  frise.style.setProperty("--h", y + basAjd + 22 + 26 + "px");
+
+  const tige = (it) => (it.cote === "h" ? HAUT0 + it.rang * PAS : BAS0 + it.rang * PAS);
+  const etiquette = (it) => {
+    const t = tige(it);
+    return [
+      h("span", { class: "metro-tige", style: it.cote === "h" ? `bottom:0;height:${t}px` : `top:0;height:${t}px` }),
+      h("span", { class: "metro-lab " + it.align, style: it.cote === "h" ? `bottom:${t + 2}px` : `top:${t + 2}px` }, h("b", {}, it.titre), h("small", {}, it.sous)),
+    ];
+  };
+  for (const it of items.filter((x) => x.salon)) voie.append(h("div", { class: "metro-nom", style: `left:${it.x}%` }, ...etiquette(it)));
+  for (const it of items.filter((x) => x.j)) voie.append(marqueur(it));
+
+  // Aujourd'hui : point qui avance, trait pointillé jusqu'en bas.
+  voie.append(h("div", { class: "metro-ajd", style: `left:${centre(d.aujourdhui)}%` },
+    h("span", { class: "metro-tige", style: `height:${basAjd}px` }), h("span", { class: "metro-pt" }),
+    h("span", { class: "metro-lab", style: `top:${basAjd + 2}px` }, "Aujourd'hui · " + fmtDate(d.aujourdhui))));
+  frise.append(voie);
+
+  // Semaines (lundis) sur l'axe du bas.
+  const axe = h("div", { class: "metro-axe" });
+  for (let i = 0; i < total; i++) {
+    const jour = plusJours(debut, i);
+    if (new Date(jour + "T00:00:00Z").getUTCDay() === 1) axe.append(h("span", { style: `left:${centre(jour)}%` }, fmtDate(jour)));
+  }
+  frise.append(axe);
 
   function poignee(j, cote) {
     const el = h("span", { class: "poignee poignee-" + cote, title: `${j.nom} : ${fmtDate(j.date)} (glisser pour déplacer)` });
@@ -1623,13 +1669,12 @@ function dessinerAccueil() {
     return el;
   }
 
-  function marqueur(j) {
+  function marqueur(it) {
+    const j = it.j;
     const alerte = avertDe(j).length && !j.fait;
-    const el = h("div", { class: "jalon" + (j.fait ? " fait" : "") + (alerte ? " alerte" : "") + (etat.jalonChoisi === (j.id ?? j.type) ? " choisi" : ""),
-      style: `left:${pct(j.date) + 50 / total}%;--rang:${j._rang}` },
-      h("span", { class: "losange" }),
-      h("span", { class: "etiquette" }, (j.fait ? "✓ " : alerte ? "⚠ " : "") + j.nom, h("small", {}, fmtDate(j.date))));
-    brancherGlisser(el, j, (date) => { el.style.left = pct(date) + 50 / total + "%"; el.querySelector("small").textContent = fmtDate(date); });
+    const el = h("div", { class: "metro-jalon" + (j.fait ? " fait" : "") + (alerte ? " alerte" : "") + (etat.jalonChoisi === (j.id ?? j.type) ? " choisi" : ""), style: `left:${it.x}%` },
+      ...etiquette(it), h("span", { class: "metro-pt", title: j.fait ? "fait" : alerte ? "à vérifier" : "" }));
+    brancherGlisser(el, j, (date) => { el.style.left = centre(date) + "%"; el.querySelector("small").textContent = fmtDate(date); });
     return el;
   }
 
@@ -1709,7 +1754,7 @@ function dessinerAccueil() {
         h("span", { class: "note", style: "font-size:13px" }, glisserPossible() ? "Glissez les jalons pour les déplacer · clic = détail" : "Touchez un jalon pour le modifier")),
       h("div", { class: "frise-cadre" }, frise),
       detail,
-      d.avertissements.length ? h("div", { class: "question", style: "margin:0 14px 14px" }, d.avertissements.map((a) => h("div", {}, "⚠ " + a.texte))) : null,
+      d.avertissements.length ? h("div", { class: "alerte-pleine", style: "margin:0 14px 14px" }, d.avertissements.map((a) => h("div", {}, a.texte))) : null,
       h("div", { style: "padding:0 14px 14px;display:flex;flex-direction:column;gap:10px" }, liste, ajout)),
     tuiles));
 }
