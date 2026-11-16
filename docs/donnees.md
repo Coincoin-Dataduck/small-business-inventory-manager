@@ -11,12 +11,12 @@ Pourquoi : chaque chiffre doit pouvoir s'expliquer, et les sorties de tampons pa
 Quantités toujours **entières**. Une fraction (« 1/45 de feuille de stickers ») devient une étape (« imprimer une feuille → 45 stickers »).
 
 ## Catalogue et stock
-**famille** — nom, ordre d'affichage, gabarit d'étapes pour les nouveaux articles (ex. mini-presse : nom + couleur).
+**famille** — nom, ordre d'affichage, gabarit d'étapes pour les nouveaux articles (ex. mini-presse : nom + couleur), « la caisse ne précise pas le modèle » (ex. Tampons).
 
 **piece** — tout ce qui a un stock.
 - nom, famille, niveau : `a_vendre` / `fait_maison` / `achete` / `recup`
 - état : en vente / fin de série (réversible)
-- suivi : `quantite` (normal) · `sans_quantite` (peinture : seulement « pot presque vide ») · `generique` (« Tampon » de la caisse : ventes comptées, pas de stock)
+- suivi : `quantite` (normal) · `sans_quantite` (peinture : seulement « pot presque vide »)
 - achat (pièces achetées) : délai fournisseur (jours), mode `quantite` / `tout_le_disponible` (VersaFine) / `jamais` (récup : alerte « gardez des cartons »), drapeau « presque vide »
 
 **piece_lot** — tailles de lot possibles d'une pièce achetée (contreplaqué : 30 / 80 / 160). Une réception de taille inconnue y est ajoutée.
@@ -38,10 +38,10 @@ Quantités toujours **entières**. Une fraction (« 1/45 de feuille de stickers 
 
 **vente_ligne** — nom et description tels que SumUp les donne, quantité, prix.
 
-**correspondance** — clé = nom + description nettoyés (espaces, casse) → ce qu'une vente décompte :
-- une ou plusieurs pièces avec quantité (ex. « Tampon lot » → 1 emballage lot + 1 sticker rond, les tampons par motif étant rattrapés aux comptages)
-- `equivalent_tampons` pour le contrôle de cohérence (unité 1, lot 4, collection 20)
-- ou « ne pas suivre »
+**correspondance** — clé = nom + description nettoyés (espaces, casse) → ce qu'une vente représente :
+- des articles avec quantité (`correspondance_piece`), retirés du stock ; éventuellement une fourniture utilisée à la vente (emballage d'un lot) ;
+- et/ou une famille « modèle non précisé » avec quantité (`correspondance_famille`) : « Tampon lot » → Tampons × 4. Pas d'effet sur le stock ; sert au comptage des tampons (thermomètre = famille réglable) ;
+- ou « ne pas suivre ».
 
 **import_etat** — dernière transaction traitée (import par tranches de ~40, limite de 50 appels du Worker gratuit).
 

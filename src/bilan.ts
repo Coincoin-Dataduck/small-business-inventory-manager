@@ -8,7 +8,7 @@ import { appliquerEspeces } from "./sumup";
 
 export const bilan = new Hono<{ Bindings: Env }>();
 
-type Corr = { ne_pas_suivre: boolean; equivalent_tampons: number; pieces: { piece_id: number; quantite: number }[] };
+type Corr = { ne_pas_suivre: boolean; pieces: { piece_id: number; quantite: number }[]; familles: { famille_id: number; quantite: number }[] };
 type PieceStat = { id: number; nom: string; famille_id: number; famille: string; niveau: string; suivi: string; fin_de_serie: number };
 export type StatSalon = {
   salon: Salon & { fin: string };
@@ -20,13 +20,12 @@ export type StatSalon = {
   noms_a_relier: number;
 };
 
-/** Article dont les ventes servent de thermomètre : réglage « article_thermometre », sinon l'article générique de la famille Tampons. */
-export async function articleThermometre(db: D1Database, pieces?: PieceStat[]) {
-  const r = await db.prepare("SELECT valeur FROM reglage WHERE cle = 'article_thermometre'").first<{ valeur: string }>();
+/** Famille dont les ventes servent de thermomètre : réglage « famille_thermometre », sinon la famille « modèle non précisé » (Tampons). */
+export async function familleThermometre(db: D1Database) {
+  const r = await db.prepare("SELECT valeur FROM reglage WHERE cle = 'famille_thermometre'").first<{ valeur: string }>();
   if (r && Number(r.valeur)) return Number(r.valeur);
-  const liste = pieces ?? ((await db.prepare("SELECT p.id, p.nom, p.famille_id, f.nom AS famille, p.niveau, p.suivi, p.fin_de_serie FROM piece p JOIN famille f ON f.id = p.famille_id").all<PieceStat>()).results);
-  const generiques = liste.filter((p) => p.suivi === "generique");
-  return (generiques.find((p) => p.famille.toLowerCase().startsWith("tampon")) ?? generiques[0])?.id ?? null;
+  const { results } = await db.prepare("SELECT id, nom FROM famille WHERE modele_non_precise = 1 ORDER BY ordre, nom").all<{ id: number; nom: string }>();
+  return (results.find((f) => f.nom.toLowerCase().startsWith("tampon")) ?? results[0])?.id ?? null;
 }
 
 export async function statistiques(db: D1Database) {
@@ -40,19 +39,21 @@ export async function statistiques(db: D1Database) {
        GROUP BY s.id, v.jour, vl.cle`,
     ),
     db.prepare("SELECT salon_id, cle, quantite AS q FROM vente_especes"),
-    db.prepare("SELECT cle, ne_pas_suivre, equivalent_tampons FROM correspondance"),
+    db.prepare("SELECT cle, ne_pas_suivre FROM correspondance"),
     db.prepare("SELECT cle, piece_id, quantite FROM correspondance_piece"),
     db.prepare("SELECT p.id, p.nom, p.famille_id, f.nom AS famille, p.niveau, p.suivi, p.fin_de_serie FROM piece p JOIN famille f ON f.id = p.famille_id"),
     db.prepare("SELECT salon_id, piece_id FROM bilan_article WHERE mal_expose = 1"),
   ]);
   const corr = new Map<string, Corr>();
-  for (const c of corrR.results as { cle: string; ne_pas_suivre: number; equivalent_tampons: number }[])
-    corr.set(c.cle, { ne_pas_suivre: !!c.ne_pas_suivre, equivalent_tampons: c.equivalent_tampons, pieces: [] });
+  for (const c of corrR.results as { cle: string; ne_pas_suivre: number }[])
+    corr.set(c.cle, { ne_pas_suivre: !!c.ne_pas_suivre, pieces: [], familles: [] });
+  const { results: cfR } = await db.prepare("SELECT cle, famille_id, quantite FROM correspondance_famille").all<{ cle: string; famille_id: number; quantite: number }>();
+  for (const f of cfR) corr.get(f.cle)?.familles.push(f);
   for (const p of cpR.results as { cle: string; piece_id: number; quantite: number }[]) corr.get(p.cle)?.pieces.push(p);
   const pieces = new Map((piecesR.results as PieceStat[]).map((p) => [p.id, p]));
-  const thermo = await articleThermometre(db, [...pieces.values()]);
-  // Tampons vendus par nom de caisse = quantité de l'article thermomètre (Tampon lot = × 4, Collection = × 20).
-  const tamponsPar = (c: Corr) => c.pieces.filter((p) => p.piece_id === thermo).reduce((t, p) => t + p.quantite, 0);
+  const thermo = await familleThermometre(db);
+  // Tampons vendus par nom de caisse = quantité reliée à la famille thermomètre (Tampon lot = × 4, Collection = × 20).
+  const tamponsPar = (c: Corr) => c.familles.filter((f) => f.famille_id === thermo).reduce((t, f) => t + f.quantite, 0);
   const estArticle = (pid: number) => { const p = pieces.get(pid); return !!p && p.niveau === "a_vendre" && p.suivi === "quantite"; };
 
   const stats = new Map<number, StatSalon>();

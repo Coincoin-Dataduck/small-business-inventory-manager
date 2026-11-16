@@ -1,4 +1,4 @@
--- Catalogue de départ d'après docs/spec.md §6 (sans les prints ni les articles en fin de série,
+-- Catalogue de départ d'après docs/spec.md §6 (à appliquer après les migrations) (sans les prints ni les articles en fin de série,
 -- créés depuis les questions SumUp). Aucune quantité, aucune recette. Rejouable sans doublon.
 -- Usage : npx wrangler d1 execute stock-hervine --remote --file scripts/catalogue_depart.sql
 
@@ -26,7 +26,6 @@ INSERT OR IGNORE INTO piece (nom, famille_id, niveau, suivi)
   ('Mini-presses', 'Élastique', 'achete', 'quantite'),
   ('Mini-presses', 'Planche de carton', 'recup', 'quantite'),
   -- Tampons
-  ('Tampons', 'Tampon (caisse)', 'a_vendre', 'generique'),
   ('Tampons', 'Tampon Miaou', 'a_vendre', 'quantite'),
   ('Tampons', 'Tampon Coin', 'a_vendre', 'quantite'),
   ('Tampons', 'Tampon Wouf', 'a_vendre', 'quantite'),
@@ -109,6 +108,9 @@ INSERT OR IGNORE INTO piece (nom, famille_id, niveau, suivi)
   ) AS v JOIN famille f ON f.nom = v.column1;
 
 UPDATE piece SET mode_achat = 'jamais' WHERE nom = 'Planche de carton';
+
+-- La caisse ne précise pas le motif des tampons (« Tampon unité ») : nécessite la migration 0002.
+UPDATE famille SET modele_non_precise = 1 WHERE nom = 'Tampons';
 
 -- Tailles de lot connues (spec §6).
 INSERT OR IGNORE INTO piece_lot (piece_id, taille)

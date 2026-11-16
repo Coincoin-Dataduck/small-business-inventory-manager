@@ -7,7 +7,7 @@ export type Env = {
 };
 
 export const NIVEAUX = ["a_vendre", "fait_maison", "achete", "recup"] as const;
-export const SUIVIS = ["quantite", "sans_quantite", "generique"] as const;
+export const SUIVIS = ["quantite", "sans_quantite"] as const; // « generique » : ancien, remplacé par famille.modele_non_precise
 
 // Stock d'une pièce = somme de ses mouvements (voir docs/donnees.md).
 export const STOCK_SQL = "(SELECT COALESCE(SUM(m.quantite), 0) FROM mouvement m WHERE m.piece_id = p.id)";

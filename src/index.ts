@@ -5,7 +5,7 @@ import { recettes } from "./recettes";
 import { salons } from "./salons";
 import { atelier } from "./atelier";
 import { questions } from "./questions";
-import { bilan, articleThermometre } from "./bilan";
+import { bilan, familleThermometre } from "./bilan";
 import { achats } from "./achats";
 import { importer } from "./sumup";
 import { controlerAcces } from "./acces";
@@ -35,7 +35,7 @@ const app = new Hono<{ Bindings: Env }>().basePath("/api");
 
 // ───────────── Familles ─────────────
 app.get("/familles", async (c) => {
-  const { results } = await c.env.DB.prepare("SELECT id, nom, ordre FROM famille ORDER BY ordre, nom").all();
+  const { results } = await c.env.DB.prepare("SELECT id, nom, ordre, modele_non_precise FROM famille ORDER BY ordre, nom").all();
   return c.json(results);
 });
 
@@ -55,6 +55,7 @@ app.patch("/familles/:id", async (c) => {
   const sets: string[] = [], vals: unknown[] = [];
   if (b.nom !== undefined) { sets.push("nom = ?"); vals.push(texte(b.nom, "nom")); }
   if (b.ordre !== undefined) { sets.push("ordre = ?"); vals.push(entier(b.ordre, "ordre")); }
+  if (b.modele_non_precise !== undefined) { sets.push("modele_non_precise = ?"); vals.push(b.modele_non_precise ? 1 : 0); }
   if (!sets.length) erreur("Rien à modifier.");
   try {
     const r = await c.env.DB.prepare(`UPDATE famille SET ${sets.join(", ")} WHERE id = ?`).bind(...vals, id).run();
@@ -116,7 +117,7 @@ app.get("/pieces/:id/mouvements", async (c) => {
 // ───────────── Stock ─────────────
 app.get("/stock", async (c) => {
   const [fams, pieces] = await c.env.DB.batch([
-    c.env.DB.prepare("SELECT id, nom, ordre FROM famille ORDER BY ordre, nom"),
+    c.env.DB.prepare("SELECT id, nom, ordre, modele_non_precise FROM famille ORDER BY ordre, nom"),
     c.env.DB.prepare(
       `SELECT p.id, p.nom, p.famille_id, p.niveau, p.suivi, p.fin_de_serie, p.presque_vide, ${STOCK_SQL} AS stock
        FROM piece p ORDER BY CASE p.niveau WHEN 'a_vendre' THEN 0 WHEN 'fait_maison' THEN 1 WHEN 'achete' THEN 2 ELSE 3 END, p.nom`,
@@ -154,11 +155,11 @@ app.post("/comptages", async (c) => {
 });
 
 // ───────────── Réglages (clé / valeur) ─────────────
-const REGLAGES_MODIFIABLES = ["article_thermometre", "seuil_jours", "marge", "marge_unique", "regroupement_auto", "tampons_min_ratio"];
+const REGLAGES_MODIFIABLES = ["famille_thermometre", "seuil_jours", "marge", "marge_unique", "regroupement_auto", "tampons_min_ratio"];
 app.get("/reglages", async (c) => {
   const { results } = await c.env.DB.prepare("SELECT cle, valeur FROM reglage").all<{ cle: string; valeur: string }>();
   const r = Object.fromEntries(results.filter((x) => REGLAGES_MODIFIABLES.includes(x.cle)).map((x) => [x.cle, x.valeur]));
-  return c.json({ ...r, article_thermometre_effectif: await articleThermometre(c.env.DB) });
+  return c.json({ ...r, famille_thermometre_effectif: await familleThermometre(c.env.DB) });
 });
 app.put("/reglages", async (c) => {
   const b = await corps(c);

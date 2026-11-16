@@ -54,27 +54,37 @@ questions.get("/questions", async (c) => {
   return c.json(sortie);
 });
 
-type DefinitionCorrespondance = { ne_pas_suivre: boolean; pieces: { piece_id: number; quantite: number }[]; equivalent_tampons: number };
+// Un nom de caisse retire des articles du stock, et/ou compte pour une famille « modèle non précisé » (ex. Tampons).
+type DefinitionCorrespondance = { ne_pas_suivre: boolean; pieces: { piece_id: number; quantite: number }[]; familles: { famille_id: number; quantite: number }[] };
 
 function lireDefinition(b: Record<string, unknown>): DefinitionCorrespondance {
-  if (b.ne_pas_suivre) return { ne_pas_suivre: true, pieces: [], equivalent_tampons: 0 };
-  if (!Array.isArray(b.pieces) || !b.pieces.length) erreur("Choisissez au moins un article, ou « Ne pas suivre ».");
-  const pieces = b.pieces.map((p: Record<string, unknown>) => ({ piece_id: entier(p?.piece_id, "article", 1), quantite: entier(p?.quantite ?? 1, "quantité", 1) }));
+  if (b.ne_pas_suivre) return { ne_pas_suivre: true, pieces: [], familles: [] };
+  const liste = (v: unknown) => (Array.isArray(v) ? v : []) as Record<string, unknown>[];
+  const pieces = liste(b.pieces).map((p) => ({ piece_id: entier(p?.piece_id, "article", 1), quantite: entier(p?.quantite ?? 1, "quantité", 1) }));
+  const familles = liste(b.familles).map((f) => ({ famille_id: entier(f?.famille_id, "famille", 1), quantite: entier(f?.quantite ?? 1, "quantité", 1) }));
+  if (!pieces.length && !familles.length) erreur("Choisissez au moins un article, ou « Ne pas suivre ».");
   if (new Set(pieces.map((p) => p.piece_id)).size !== pieces.length) erreur("Un même article apparaît deux fois.");
-  const equivalent_tampons = b.equivalent_tampons === undefined || b.equivalent_tampons === "" ? 0 : entier(b.equivalent_tampons, "équivalent tampons", 0);
-  return { ne_pas_suivre: false, pieces, equivalent_tampons };
+  if (new Set(familles.map((f) => f.famille_id)).size !== familles.length) erreur("Une même famille apparaît deux fois.");
+  return { ne_pas_suivre: false, pieces, familles };
 }
 
 /** (Re)définit ce qu'un nom SumUp retire du stock, puis réapplique toutes ses ventes. */
 async function definirCorrespondance(db: D1Database, cle: string, nom_affiche: string, d: DefinitionCorrespondance) {
   if (d.pieces.length) await lirePieces(db, d.pieces.map((p) => p.piece_id));
+  if (d.familles.length) {
+    const ids = d.familles.map((f) => f.famille_id);
+    const { results } = await db.prepare(`SELECT id FROM famille WHERE modele_non_precise = 1 AND id IN (${ids.map(() => "?").join(",")})`).bind(...ids).all();
+    if (results.length !== ids.length) erreur("Seules les familles dont la caisse ne précise pas le modèle peuvent être choisies ainsi.");
+  }
   await db.batch([
     db.prepare(
-      `INSERT INTO correspondance (cle, nom_affiche, ne_pas_suivre, equivalent_tampons) VALUES (?, ?, ?, ?)
-       ON CONFLICT (cle) DO UPDATE SET ne_pas_suivre = excluded.ne_pas_suivre, equivalent_tampons = excluded.equivalent_tampons`,
-    ).bind(cle, nom_affiche, d.ne_pas_suivre ? 1 : 0, d.equivalent_tampons),
+      `INSERT INTO correspondance (cle, nom_affiche, ne_pas_suivre) VALUES (?, ?, ?)
+       ON CONFLICT (cle) DO UPDATE SET ne_pas_suivre = excluded.ne_pas_suivre`,
+    ).bind(cle, nom_affiche, d.ne_pas_suivre ? 1 : 0),
     db.prepare("DELETE FROM correspondance_piece WHERE cle = ?").bind(cle),
+    db.prepare("DELETE FROM correspondance_famille WHERE cle = ?").bind(cle),
     ...d.pieces.map((p) => db.prepare("INSERT INTO correspondance_piece (cle, piece_id, quantite) VALUES (?, ?, ?)").bind(cle, p.piece_id, p.quantite)),
+    ...d.familles.map((f) => db.prepare("INSERT INTO correspondance_famille (cle, famille_id, quantite) VALUES (?, ?, ?)").bind(cle, f.famille_id, f.quantite)),
     // Les ventes déjà appliquées avec l'ancienne définition sont retirées puis réappliquées.
     db.prepare("DELETE FROM mouvement WHERE source_type = 'vente_ligne' AND source_id IN (SELECT id FROM vente_ligne WHERE cle = ?)").bind(cle),
     db.prepare("DELETE FROM mouvement WHERE source_type = 'vente_especes' AND source_id IN (SELECT id FROM vente_especes WHERE cle = ?)").bind(cle),
@@ -146,15 +156,20 @@ questions.post("/questions/reponse-groupee", async (c) => {
 // ───────────── Correspondances (Réglages) ─────────────
 questions.get("/correspondances", async (c) => {
   const db = c.env.DB;
-  const [corr, pieces, compte] = await db.batch([
-    db.prepare("SELECT cle, nom_affiche, ne_pas_suivre, equivalent_tampons FROM correspondance ORDER BY nom_affiche"),
+  const [corr, pieces, familles, compte] = await db.batch([
+    db.prepare("SELECT cle, nom_affiche, ne_pas_suivre FROM correspondance ORDER BY nom_affiche"),
     db.prepare("SELECT cp.cle, cp.piece_id, cp.quantite, p.nom FROM correspondance_piece cp JOIN piece p ON p.id = cp.piece_id"),
+    db.prepare("SELECT cf.cle, cf.famille_id, cf.quantite, f.nom FROM correspondance_famille cf JOIN famille f ON f.id = cf.famille_id"),
     db.prepare("SELECT cle, SUM(quantite) AS vendus FROM vente_ligne GROUP BY cle"),
   ]);
-  const parCle = new Map<string, unknown[]>();
-  for (const p of pieces.results as { cle: string }[]) (parCle.get(p.cle) ?? parCle.set(p.cle, []).get(p.cle)!).push(p);
+  const grouper = (rows: { cle: string }[]) => {
+    const m = new Map<string, unknown[]>();
+    for (const r of rows) (m.get(r.cle) ?? m.set(r.cle, []).get(r.cle)!).push(r);
+    return m;
+  };
+  const parCle = grouper(pieces.results as { cle: string }[]), famParCle = grouper(familles.results as { cle: string }[]);
   const vendus = new Map((compte.results as { cle: string; vendus: number }[]).map((x) => [x.cle, x.vendus]));
-  return c.json((corr.results as { cle: string }[]).map((x) => ({ ...x, pieces: parCle.get(x.cle) ?? [], vendus: vendus.get(x.cle) ?? 0 })));
+  return c.json((corr.results as { cle: string }[]).map((x) => ({ ...x, pieces: parCle.get(x.cle) ?? [], familles: famParCle.get(x.cle) ?? [], vendus: vendus.get(x.cle) ?? 0 })));
 });
 
 questions.put("/correspondances", async (c) => {

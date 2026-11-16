@@ -4,7 +4,6 @@ const NIVEAUX = { a_vendre: "À vendre", fait_maison: "Fourniture maison", achet
 const SUIVIS = {
   quantite: "Compté à la pièce",
   sans_quantite: "Sans quantité (ex. peinture)",
-  generique: "Générique, sans stock (ex. « Tampon » de la caisse)",
 };
 const PAGES = [
   { id: "stock", label: "Stock" },
@@ -325,7 +324,13 @@ function dessinerReglages() {
     h("h2", {}, "Familles"),
     etat.familles.length
       ? h("table", { class: "tbl" }, h("tbody", {}, etat.familles.map((f) =>
-          h("tr", {}, h("td", { style: "font-weight:600" }, f.nom), h("td", { class: "num" },
+          h("tr", {}, h("td", { style: "font-weight:600" }, f.nom),
+            h("td", {}, h("label", { class: "ligne-editeur note", title: "Ex. Tampons : la caisse vend « Tampon unité » sans dire quel motif." },
+              h("input", { type: "checkbox", checked: !!f.modele_non_precise, onchange: (e) => tenter(async () => {
+                await api("/familles/" + f.id, { method: "PATCH", body: { modele_non_precise: e.target.checked } });
+                await pageReglages();
+              }) }), "La caisse ne précise pas le modèle")),
+            h("td", { class: "num" },
             h("button", { class: "btn-petit", onclick: () => tenter(async () => {
               const nom = prompt("Nouveau nom de la famille", f.nom);
               if (!nom || nom === f.nom) return;
@@ -373,20 +378,24 @@ function dessinerReglages() {
 }
 
 // Article thermomètre : ses ventes mesurent le passage devant le stand (Tampon lot = × 4, Collection = × 20).
+// Famille thermomètre : ses ventes mesurent le passage devant le stand (Tampon lot = × 4, Collection = × 20).
 function sectionThermometre() {
   const r = etat.reglages ?? {};
-  const effectif = r.article_thermometre_effectif ?? null;
+  const effectif = r.famille_thermometre_effectif ?? null;
+  const candidates = etat.familles.filter((f) => f.modele_non_precise);
   return h("section", { class: "carte" },
     h("h2", {}, "Thermomètre des salons"),
     h("div", { class: "formulaire" },
-      h("label", {}, "Article dont les ventes mesurent le passage",
-        selectPiece(effectif, (v) => tenter(async () => {
-          await api("/reglages", { method: "PUT", body: { cle: "article_thermometre", valeur: v || null } });
-          flash("Thermomètre enregistré.");
-          await pageReglages();
-        }), "Article thermomètre", "articles")),
-      h("p", { class: "note", style: "margin:0;max-width:520px;font-size:13px" },
-        "C'est l'article « tampon sans motif » vendu à la caisse. Reliez « Tampon lot » à cet article × 4 et « Collection » × 20 : le nombre de tampons vendus en découle.")));
+      candidates.length
+        ? h("label", {}, "Famille dont les ventes mesurent le passage",
+            h("select", { "aria-label": "Famille thermomètre", onchange: (e) => tenter(async () => {
+              await api("/reglages", { method: "PUT", body: { cle: "famille_thermometre", valeur: e.target.value || null } });
+              flash("Thermomètre enregistré.");
+              await pageReglages();
+            }) }, candidates.map((f) => h("option", { value: String(f.id), selected: f.id === effectif }, f.nom))))
+        : h("div", { class: "note" }, "Cochez « La caisse ne précise pas le modèle » sur la famille Tampons (ci-dessous)."),
+      h("p", { class: "note", style: "margin:0;max-width:560px;font-size:13px" },
+        "Dans les questions, reliez « Tampon unité » à « Tampons, modèle non précisé » × 1, « Tampon lot » × 4, « Collection » × 20 : le nombre de tampons vendus en découle. Le stock de chaque motif se suit par les comptages.")));
 }
 
 function lignePieceReglage(p) {
@@ -442,6 +451,26 @@ function selectPiece(valeur, onchange, label, filtre) {
       f.pieces.filter(garde).map((p) => h("option", { value: String(p.id), selected: p.id === valeur }, filtre ? p.nom : `${p.nom} (${NIVEAUX[p.niveau]})`)))),
   );
 }
+// Article, ou famille dont la caisse ne précise pas le modèle (valeur « f<id> »).
+function selectArticleOuFamille(l, label) {
+  const familles = etat.stock.filter((f) => f.modele_non_precise);
+  const valeur = l.famille_id ? "f" + l.famille_id : l.piece_id ? String(l.piece_id) : "";
+  return h("select", { "aria-label": label, onchange: (e) => {
+      const v = e.target.value;
+      if (v.startsWith("f")) { l.famille_id = Number(v.slice(1)); l.piece_id = null; }
+      else { l.piece_id = v ? Number(v) : null; l.famille_id = null; }
+    } },
+    h("option", { value: "", selected: !valeur }, "— choisir —"),
+    familles.length ? h("optgroup", { label: "Modèle non précisé à la caisse" },
+      familles.map((f) => h("option", { value: "f" + f.id, selected: valeur === "f" + f.id }, `${f.nom}, modèle non précisé`))) : null,
+    etat.stock.filter((f) => f.pieces.some((p) => p.niveau === "a_vendre")).map((f) => h("optgroup", { label: f.nom },
+      f.pieces.filter((p) => p.niveau === "a_vendre").map((p) => h("option", { value: String(p.id), selected: valeur === String(p.id) }, p.nom)))));
+}
+const choisie = (l) => !!(l.piece_id || l.famille_id);
+const corpsReponse = (lignes) => ({
+  pieces: lignes.filter((l) => l.piece_id).map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })),
+  familles: lignes.filter((l) => l.famille_id).map((l) => ({ famille_id: l.famille_id, quantite: Number(l.quantite) })),
+});
 const estFourniture = (id) => { const p = toutesPieces().find((x) => x.id === id); return !!p && p.niveau !== "a_vendre"; };
 
 function resumeEtape(e) {
@@ -1124,8 +1153,8 @@ function carteGroupeNom(groupe) {
       h("div", { class: "barre-comptage" },
         h("button", { class: "btn-sec", onclick: () => repondre({ ne_pas_suivre: true }, (r) => `${r.noms} nom(s) marqué(s) « Ne pas suivre ».`) }, "Ne pas suivre"),
         h("button", { class: "btn", onclick: () => {
-          if (b.lignes.some((l) => !l.piece_id)) return flash("Choisissez un article sur chaque ligne.", true);
-          repondre({ pieces: b.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })), equivalent_tampons: 0 },
+          if (!b.lignes.every(choisie)) return flash("Choisissez un article sur chaque ligne.", true);
+          repondre(corpsReponse(b.lignes),
             (r) => `Enregistré pour ${r.noms} nom(s). ${r.ventes_appliquees} vente(s) retirée(s) du stock ; les ventes antérieures au début du suivi d'un article ne servent qu'aux statistiques.`);
         } }, "Enregistrer"))));
 }
@@ -1156,7 +1185,7 @@ function creationRapide(b, nomPropose) {
         if (c.famille === "nouvelle") famille_id = (await api("/familles", { method: "POST", body: { nom: c.nouvelleFamille, ordre: etat.stock.length } })).id;
         const { id } = await api("/pieces", { method: "POST", body: { nom: c.nom, famille_id, niveau: c.niveau, suivi: c.suivi } });
         etat.stock = await api("/stock");
-        const vide = b.lignes.find((l) => !l.piece_id);
+        const vide = b.lignes.find((l) => !choisie(l) && !l.fourniture);
         if (vide) vide.piece_id = id; else b.lignes.push({ piece_id: id, quantite: 1 });
         b.creation = null;
         flash(`« ${c.nom} » créé et choisi ci-dessus. Vérifiez puis « Enregistrer ».`);
@@ -1168,7 +1197,7 @@ function creationRapide(b, nomPropose) {
 function lignesReponse(etatLignes, label, redessiner) {
   const ligne = (l, i) => h("div", { class: "ligne-editeur" },
     l.fourniture ? h("span", { class: "note" }, "fourniture") : null,
-    selectPiece(l.piece_id, (v) => { l.piece_id = v; }, l.fourniture ? "Fourniture utilisée à la vente" : label, l.fourniture ? "fournitures" : "articles"),
+    l.fourniture ? selectPiece(l.piece_id, (v) => { l.piece_id = v; }, "Fourniture utilisée à la vente", "fournitures") : selectArticleOuFamille(l, label),
     h("span", { class: "note" }, "×"),
     h("input", { type: "number", min: "1", step: "1", class: "compte", value: String(l.quantite), "aria-label": "Quantité", oninput: (e) => { l.quantite = e.target.value; } }),
     etatLignes.length > 1 ? h("button", { type: "button", class: "btn-petit", onclick: () => { etatLignes.splice(i, 1); redessiner(); } }, "Retirer") : null);
@@ -1226,8 +1255,8 @@ function carteQuestion(q) {
         h("div", { class: "barre-comptage" },
           h("button", { class: "btn-sec", onclick: () => repondre({ ne_pas_suivre: true }, () => "Noté : ce nom ne sera pas suivi.") }, "Ne pas suivre"),
           h("button", { class: "btn", onclick: () => {
-            if (b.lignes.some((l) => !l.piece_id)) return flash("Choisissez un article sur chaque ligne.", true);
-            repondre({ pieces: b.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })), equivalent_tampons: 0 },
+            if (!b.lignes.every(choisie)) return flash("Choisissez un article sur chaque ligne.", true);
+            repondre(corpsReponse(b.lignes),
               (r) => `Enregistré. ${r.ventes_appliquees} vente(s) récente(s) retirée(s) du stock (les ventes antérieures au début du suivi d'un article ne comptent que pour les statistiques).`);
           } }, "Enregistrer"))));
   }
@@ -1243,8 +1272,8 @@ function carteQuestion(q) {
         h("div", { class: "barre-comptage" },
           h("button", { class: "btn-sec", onclick: () => repondre({ rien: true }, () => "Noté.") }, "Rien n'est revenu"),
           h("button", { class: "btn", onclick: () => {
-            if (b.lignes.some((l) => !l.piece_id)) return flash("Choisissez un article sur chaque ligne.", true);
-            repondre({ pieces: b.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })) }, () => "Remis en stock.");
+            if (!b.lignes.every(choisie)) return flash("Choisissez un article sur chaque ligne.", true);
+            repondre({ pieces: corpsReponse(b.lignes).pieces }, () => "Remis en stock.");
           } }, "Remettre en stock"))));
   }
   return h("section", { class: "carte" }, h("div", { class: "vide" }, "Question : " + q.type));
@@ -1268,15 +1297,19 @@ function sectionCorrespondances() {
               h("button", { class: "btn-sec", onclick: () => { etat.corrEdition = null; dessinerReglages(); } }, "Annuler"),
               h("button", { class: "btn-sec", onclick: () => sauverCorrespondance({ cle: c.cle, ne_pas_suivre: true }) }, "Ne pas suivre"),
               h("button", { class: "btn", onclick: () => {
-                if (ed.lignes.some((l) => !l.piece_id)) return flash("Choisissez un article sur chaque ligne.", true);
-                sauverCorrespondance({ cle: c.cle, pieces: ed.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })), equivalent_tampons: 0 });
+                if (!ed.lignes.every(choisie)) return flash("Choisissez un article sur chaque ligne.", true);
+                sauverCorrespondance({ cle: c.cle, ...corpsReponse(ed.lignes) });
               } }, "Enregistrer")))))
         : h("tr", {},
             h("td", { style: "font-weight:600" }, c.nom_affiche),
-            h("td", {}, c.ne_pas_suivre ? h("span", { class: "note" }, "non suivi") : c.pieces.map((p) => `${p.quantite > 1 ? p.quantite + " × " : ""}${p.nom}`).join(" + ")),
+            h("td", {}, c.ne_pas_suivre ? h("span", { class: "note" }, "non suivi") : [
+              ...c.familles.map((f) => `${f.quantite > 1 ? f.quantite + " × " : ""}${f.nom} (modèle non précisé)`),
+              ...c.pieces.map((p) => `${p.quantite > 1 ? p.quantite + " × " : ""}${p.nom}`)].join(" + ")),
             h("td", { class: "num" }, c.vendus),
             h("td", {}, h("div", { class: "actions-ligne" }, h("button", { class: "btn-petit", disabled: !!ed, onclick: () => {
-              etat.corrEdition = { cle: c.cle, tampons: String(c.equivalent_tampons), lignes: c.pieces.length ? c.pieces.map((p) => ({ piece_id: p.piece_id, quantite: p.quantite, fourniture: estFourniture(p.piece_id) })) : [{ piece_id: null, quantite: 1 }] };
+              const lignes = [...c.familles.map((f) => ({ famille_id: f.famille_id, quantite: f.quantite })),
+                ...c.pieces.map((p) => ({ piece_id: p.piece_id, quantite: p.quantite, fourniture: estFourniture(p.piece_id) }))];
+              etat.corrEdition = { cle: c.cle, lignes: lignes.length ? lignes : [{ piece_id: null, quantite: 1 }] };
               dessinerReglages();
             } }, "Modifier"))))))));
 }
