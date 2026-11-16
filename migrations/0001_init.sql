@@ -88,41 +88,34 @@ CREATE TABLE etape_faite (
 );
 
 -- ───────────── Salons et préparations ─────────────
-CREATE TABLE preparation (
-  id    INTEGER PRIMARY KEY,
-  nom   TEXT,
-  mode  TEXT NOT NULL DEFAULT 'auto' CHECK (mode IN ('auto','manuel')),
-  marge REAL
-);
-
+-- Les préparations ne sont pas stockées : elles se déduisent des dates, du seuil (réglage)
+-- et du choix manuel « regroupé avec le salon précédent ».
 CREATE TABLE salon (
-  id              INTEGER PRIMARY KEY,
-  nom             TEXT NOT NULL,
-  type            TEXT,
-  date_debut      TEXT NOT NULL,     -- AAAA-MM-JJ
-  nb_jours        INTEGER NOT NULL DEFAULT 1 CHECK (nb_jours > 0),
-  frequentation   INTEGER,
-  especes_montant REAL,
-  preparation_id  INTEGER REFERENCES preparation(id)
+  id                      INTEGER PRIMARY KEY,
+  nom                     TEXT NOT NULL,
+  type                    TEXT,
+  date_debut              TEXT NOT NULL,     -- AAAA-MM-JJ
+  nb_jours                INTEGER NOT NULL DEFAULT 1 CHECK (nb_jours > 0),
+  frequentation           INTEGER,
+  tampons_prevus          INTEGER,
+  especes_montant         REAL,
+  regroupe_avec_precedent INTEGER CHECK (regroupe_avec_precedent IN (0, 1))   -- NULL = proposition automatique
 );
 
 CREATE TABLE objectif (
-  id             INTEGER PRIMARY KEY,
-  preparation_id INTEGER NOT NULL REFERENCES preparation(id) ON DELETE CASCADE,
-  salon_id       INTEGER NOT NULL REFERENCES salon(id) ON DELETE CASCADE,
-  piece_id       INTEGER NOT NULL REFERENCES piece(id),
-  tampons_prevus INTEGER,
-  conseille      INTEGER,
-  calcul         TEXT,               -- JSON : détail affiché
-  retenu         INTEGER,
-  UNIQUE (salon_id, piece_id)
+  salon_id  INTEGER NOT NULL REFERENCES salon(id) ON DELETE CASCADE,
+  piece_id  INTEGER NOT NULL REFERENCES piece(id),
+  conseille INTEGER,
+  calcul    TEXT,               -- JSON : détail affiché
+  retenu    INTEGER NOT NULL CHECK (retenu >= 0),
+  PRIMARY KEY (salon_id, piece_id)
 );
 
 CREATE TABLE comptage (
   id             INTEGER PRIMARY KEY,
   date           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%fZ','now')),
   type           TEXT NOT NULL DEFAULT 'libre' CHECK (type IN ('libre','avant')),
-  preparation_id INTEGER REFERENCES preparation(id)
+  salon_id       INTEGER REFERENCES salon(id)   -- comptage avant : premier salon de la préparation
 );
 
 CREATE TABLE comptage_ligne (

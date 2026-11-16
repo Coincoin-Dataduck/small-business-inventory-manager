@@ -64,8 +64,8 @@ export async function lirePieces(db: D1Database, ids: number[]) {
  * Instructions d'un comptage, à exécuter dans un même lot (transaction) :
  * l'attendu est lu au moment de l'enregistrement, seule la différence devient un mouvement.
  */
-export function instructionsComptage(db: D1Database, lignes: LigneComptage[], type: "libre" | "avant", preparation_id: number | null) {
-  const stmts = [db.prepare("INSERT INTO comptage (type, preparation_id) VALUES (?, ?)").bind(type, preparation_id)];
+export function instructionsComptage(db: D1Database, lignes: LigneComptage[], type: "libre" | "avant", salon_id: number | null) {
+  const stmts = [db.prepare("INSERT INTO comptage (type, salon_id) VALUES (?, ?)").bind(type, salon_id)];
   for (const l of lignes) {
     stmts.push(
       db.prepare(

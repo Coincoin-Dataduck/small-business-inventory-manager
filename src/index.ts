@@ -2,6 +2,8 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { Env, NIVEAUX, SUIVIS, STOCK_SQL, erreur, texte, entier, choix, corps, lireLignesComptage, lirePieces, instructionsComptage } from "./outils";
 import { recettes } from "./recettes";
+import { salons } from "./salons";
+import { atelier } from "./atelier";
 const app = new Hono<{ Bindings: Env }>().basePath("/api");
 
 // ───────────── Familles ─────────────
@@ -106,7 +108,8 @@ app.get("/stock", async (c) => {
 app.post("/comptages", async (c) => {
   const b = await corps(c);
   const type = b.type === undefined ? "libre" : choix(b.type, ["libre", "avant"] as const, "type");
-  const preparation_id = b.preparation_id == null ? null : entier(b.preparation_id, "préparation", 1);
+  const salon_id = b.salon_id == null ? null : entier(b.salon_id, "salon", 1);
+  if (type === "avant" && salon_id === null) erreur("Un comptage avant doit indiquer le salon.");
   const lignes = lireLignesComptage(b.lignes);
   if (!lignes.length) erreur("Aucune quantité comptée.");
   const pieces = await lirePieces(c.env.DB, lignes.map((l) => l.piece_id));
@@ -114,7 +117,7 @@ app.post("/comptages", async (c) => {
 
   const db = c.env.DB;
   const res = await db.batch([
-    ...instructionsComptage(db, lignes, type, preparation_id),
+    ...instructionsComptage(db, lignes, type, salon_id),
     db.prepare(
       "SELECT cl.piece_id, p.nom, cl.attendu, cl.compte, cl.compte - cl.attendu AS ecart, cl.comptage_id FROM comptage_ligne cl JOIN piece p ON p.id = cl.piece_id WHERE cl.comptage_id = (SELECT MAX(id) FROM comptage)",
     ),
@@ -124,6 +127,8 @@ app.post("/comptages", async (c) => {
 });
 
 app.route("/", recettes);
+app.route("/", salons);
+app.route("/", atelier);
 
 app.onError((e, c) => {
   if (e instanceof HTTPException) return c.json({ erreur: e.message }, e.status);

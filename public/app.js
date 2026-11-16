@@ -10,7 +10,7 @@ const PAGES = [
   { id: "stock", label: "Stock" },
   { id: "atelier", label: "Atelier" },
   { id: "achats", label: "À acheter", bientot: true },
-  { id: "salons", label: "Salons", bientot: true },
+  { id: "salons", label: "Salons" },
   { id: "questions", label: "Questions", bientot: true },
   { id: "reglages", label: "Réglages" },
 ];
@@ -60,10 +60,14 @@ function signe(n) { return n > 0 ? "+" + n : String(n); }
 const etat = {
   page: "stock", filtre: null, comptage: null, ligneEnCours: null, stock: [], familles: [], edition: null,
   etapes: [], editeur: null, fait: null, faites: [],
+  params: [], salons: null, salonEdition: null, objectifs: null, plan: null, comptageAvant: null,
 };
 
+// Adresses : #stock, #stock/avant/<salon>, #atelier, #salons, #objectifs/<préparation>, #reglages
 function pageCourante() {
-  const id = location.hash.replace("#", "");
+  const [id, ...params] = location.hash.replace("#", "").split("/");
+  etat.params = params;
+  if (id === "objectifs" && params[0]) return "objectifs";
   return PAGES.some((p) => p.id === id && !p.bientot) ? id : "stock";
 }
 
@@ -72,7 +76,7 @@ function dessinerMenu() {
   nav.replaceChildren(
     ...PAGES.map((p) =>
       h("button", {
-        "aria-current": etat.page === p.id ? "page" : null,
+        "aria-current": etat.page === p.id || (etat.page === "objectifs" && p.id === "salons") ? "page" : null,
         disabled: p.bientot,
         title: p.bientot ? "Pas encore construit" : null,
         onclick: () => { location.hash = p.id; },
@@ -88,6 +92,8 @@ async function afficher() {
     if (etat.page === "stock") await pageStock();
     if (etat.page === "reglages") await pageReglages();
     if (etat.page === "atelier") await pageAtelier();
+    if (etat.page === "salons") await pageSalons();
+    if (etat.page === "objectifs") await pageObjectifs(Number(etat.params[0]));
   });
 }
 
@@ -99,6 +105,15 @@ function entete(titre, action) {
 // ───────────── Stock ─────────────
 async function pageStock() {
   etat.stock = await api("/stock");
+  // Comptage avant une préparation : #stock/avant/<premier salon>
+  if (etat.params[0] === "avant" && etat.params[1] && etat.comptage === null) {
+    const salons = await api("/salons");
+    const prep = salons.preparations.find((p) => p.id === Number(etat.params[1]));
+    if (prep) {
+      etat.comptageAvant = { salon_id: prep.id, nom: nomPreparation(prep, salons.salons) };
+      etat.comptage = {};
+    }
+  }
   dessinerStock();
 }
 
@@ -108,7 +123,8 @@ function piecesVisibles() {
 
 function dessinerStock() {
   const enComptage = etat.comptage !== null;
-  entete("Stock", enComptage ? null : h("button", { class: "btn", onclick: demarrerComptage }, "Faire un comptage"));
+  entete(etat.comptageAvant ? "Comptage avant · " + etat.comptageAvant.nom : "Stock",
+    enComptage ? null : h("button", { class: "btn", onclick: demarrerComptage }, "Faire un comptage"));
   const page = document.getElementById("page");
 
   if (!etat.stock.length) {
@@ -234,7 +250,7 @@ function nbEcarts() {
 function barreComptage() {
   return h("div", { class: "barre-comptage", id: "barre-comptage" },
     h("span", { id: "nb-ecarts" }, texteEcarts()),
-    h("button", { class: "btn-sec", onclick: () => { etat.comptage = null; dessinerStock(); } }, "Annuler"),
+    h("button", { class: "btn-sec", onclick: () => { etat.comptage = null; if (etat.comptageAvant) { etat.comptageAvant = null; location.hash = "salons"; } else dessinerStock(); } }, "Annuler"),
     h("button", { class: "btn", onclick: () => tenter(sauverComptage) }, "Enregistrer le comptage"),
   );
 }
@@ -255,9 +271,9 @@ function demarrerComptage() {
   dessinerStock();
 }
 
-async function enregistrerComptage(lignes) {
+async function enregistrerComptage(lignes, avant = null) {
   if (lignes.some((l) => !Number.isInteger(l.compte) || l.compte < 0)) throw new Error("Les quantités comptées doivent être des nombres entiers, 0 ou plus.");
-  const r = await api("/comptages", { method: "POST", body: { lignes } });
+  const r = await api("/comptages", { method: "POST", body: avant ? { lignes, type: "avant", salon_id: avant.salon_id } : { lignes } });
   flash(r.ecarts ? `Comptage enregistré : ${r.ecarts} chiffre(s) corrigé(s).` : "Comptage enregistré : tout était juste.");
   return r;
 }
@@ -265,8 +281,9 @@ async function enregistrerComptage(lignes) {
 async function sauverComptage() {
   const lignes = lignesSaisies();
   if (!lignes.length) throw new Error("Aucune quantité saisie.");
-  await enregistrerComptage(lignes);
+  await enregistrerComptage(lignes, etat.comptageAvant);
   etat.comptage = null;
+  if (etat.comptageAvant) { etat.comptageAvant = null; location.hash = "salons"; return; }
   await pageStock();
 }
 
@@ -518,7 +535,7 @@ function editeurEtape(ed) {
 
 // ───────────── Atelier ─────────────
 async function pageAtelier() {
-  [etat.etapes, etat.stock, etat.faites] = await Promise.all([api("/etapes"), api("/stock"), api("/etapes-faites")]);
+  [etat.plan, etat.etapes, etat.stock, etat.faites] = await Promise.all([api("/atelier"), api("/etapes"), api("/stock"), api("/etapes-faites")]);
   dessinerAtelier();
 }
 
@@ -526,19 +543,58 @@ function stockDe(id) {
   return toutesPieces().find((p) => p.id === id)?.stock ?? 0;
 }
 
+function ouvrirFait(cle, e, pre = {}) {
+  etat.fait = { cle, etape_id: e.id, fois: String(pre.fois ?? 1), donne: { ...(pre.donne ?? {}) }, touche: new Set(), manque: null, comptages: {} };
+  dessinerAtelier();
+}
+
 function dessinerAtelier() {
   entete("Atelier");
   const page = document.getElementById("page");
-  const intro = h("div", { class: "note" },
-    "Toutes les étapes, famille par famille. Les étapes à faire en priorité pour le prochain salon apparaîtront ici quand les salons et objectifs seront en place.");
-  if (!etat.etapes.length) {
-    page.replaceChildren(intro, h("div", { class: "carte" }, h("div", { class: "vide" }, "Aucune recette. Décrivez les étapes dans ", h("a", { href: "#reglages" }, "Réglages"), ".")));
-    return;
+  const plan = etat.plan;
+  const blocs = [];
+
+  if (!plan || !plan.preparation) {
+    blocs.push(h("div", { class: "carte" }, h("div", { class: "vide" },
+      "Aucun salon à venir. Ajoutez le prochain salon dans ", h("a", { href: "#salons" }, "Salons"), " et fixez ses objectifs : l'Atelier dira quoi faire, dans l'ordre.")));
+  } else {
+    const premier = plan.salons[0];
+    const j = joursEntre(new Date().toISOString().slice(0, 10), premier.date_debut);
+    const nom = plan.salons.map((s) => s.nom).join(" + ");
+    const temps = plan.travail_min ? "≈ " + dureeTexte(plan.travail_min) : "—";
+    blocs.push(h("section", { class: "bandeau" },
+      h("div", {}, h("span", { class: "note" }, "On prépare"), h("strong", {}, nom)),
+      h("div", {}, h("span", { class: "note" }, "Tout prêt avant"), h("strong", {}, `le ${fmtDate(premier.date_debut)} · ${j > 0 ? `dans ${j} jour${j > 1 ? "s" : ""}` : "c'est maintenant"}`)),
+      h("div", {}, h("span", { class: "note" }, "Travail restant"), h("strong", {}, temps),
+        h("span", { class: "note", style: "font-size:12px" }, "en ne comptant que ce qu'il reste à faire" + (plan.etapes_sans_temps ? ` · ${plan.etapes_sans_temps} étape(s) sans temps renseigné` : "")))));
+
+    if (plan.problemes.length) blocs.push(h("div", { class: "question" }, h("strong", {}, "À régler"), plan.problemes.map((p) => h("div", {}, p))));
+
+    const aFaire = plan.articles.filter((a) => a.manque > 0);
+    const prets = plan.articles.filter((a) => a.manque === 0);
+    if (!plan.articles.length) {
+      blocs.push(h("div", { class: "carte" }, h("div", { class: "vide" }, "Aucun objectif pour cette préparation. ",
+        h("a", { href: "#objectifs/" + plan.preparation.id }, "Fixer les objectifs"), ".")));
+    } else {
+      blocs.push(h("p", { class: "note", style: "margin:0" },
+        "Pour chaque article, l'outil part de ce qui est déjà fait maison et ne propose de refaire une étape que si la réserve ne suffit pas. Les étapes sont numérotées dans l'ordre où les faire."));
+      blocs.push(...aFaire.map(carteArticle));
+      if (prets.length) blocs.push(h("div", { class: "note" }, h("strong", {}, "Déjà prêt : "), prets.map((a) => `${a.nom} (${a.prets}/${a.a_avoir})`).join(", ")));
+      if (plan.a_acheter.length) blocs.push(h("section", { class: "carte" }, h("h2", {}, "Il manque des fournitures"),
+        h("table", { class: "tbl" }, h("tbody", {}, plan.a_acheter.map((x) => h("tr", {}, h("td", { style: "font-weight:600" }, x.nom), h("td", { class: "num qte" }, x.manque)))))));
+    }
   }
-  const cartes = etat.stock.filter((f) => etat.etapes.some((e) => e.famille_id === f.id)).map((f) =>
-    h("section", { class: "carte" }, h("h2", {}, f.nom),
-      h("div", { class: "liste-etapes" }, etat.etapes.filter((e) => e.famille_id === f.id).map(carteEtape))));
-  const historique = etat.faites.length ? h("section", { class: "carte" }, h("h2", {}, "Dernières saisies"),
+
+  // Toutes les étapes : pour noter ce qui a été fait hors plan.
+  const toutes = h("details", { class: "carte", open: !plan?.preparation || !etat.plan?.articles?.length ? true : null },
+    h("summary", { class: "resume-details" }, "Toutes les étapes (pour noter un travail fait hors de cette liste)"),
+    etat.etapes.length
+      ? etat.stock.filter((f) => etat.etapes.some((e) => e.famille_id === f.id)).map((f) =>
+          h("div", {}, h("h3", { class: "sous-titre" }, f.nom), h("div", { class: "liste-etapes" }, etat.etapes.filter((e) => e.famille_id === f.id).map((e) => carteEtape(e)))))
+      : h("div", { class: "vide" }, "Aucune recette. Décrivez les étapes dans ", h("a", { href: "#reglages" }, "Réglages"), "."));
+  blocs.push(toutes);
+
+  if (etat.faites.length) blocs.push(h("section", { class: "carte" }, h("h2", {}, "Dernières saisies"),
     h("table", { class: "tbl" }, h("tbody", {}, etat.faites.map((x) => h("tr", {},
       h("td", {}, new Date(x.date).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })),
       h("td", { style: "font-weight:600" }, x.nom), h("td", { class: "num" }, "× " + x.fois),
@@ -547,19 +603,62 @@ function dessinerAtelier() {
         await api("/etapes-faites/" + x.id, { method: "DELETE" });
         flash("Saisie annulée.");
         await pageAtelier();
-      }) }, "Annuler cette saisie")))))))) : null;
-  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, intro, ...cartes, historique));
+      }) }, "Annuler cette saisie")))))))));
+
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, ...blocs));
+}
+
+function carteArticle(a) {
+  const plan = etat.plan;
+  const split = a.par_salon.filter((x) => x.retenu).map((x) => `${x.retenu} à ${plan.salons.find((s) => s.id === x.salon_id)?.nom}`).join(", ");
+  const travaux = plan.travaux.filter((t) => t.sert.includes(a.piece_id));
+  const reserve = travaux.flatMap((t) => t.donne.filter((g) => g.reserve > 0).map((g) => `${g.reserve} ${g.nom}`));
+  return h("section", { class: "carte" },
+    h("div", { class: "tete-article" },
+      h("div", {}, h("h2", { style: "padding:0" }, a.nom), h("div", { class: "note" }, `objectif ${a.a_avoir}${split ? ` (${split} + marge)` : ""} · ${a.prets} prêt${a.prets > 1 ? "s" : ""}`)),
+      h("div", { class: "manque" }, "il en manque ", h("strong", {}, a.manque))),
+    reserve.length ? h("div", { class: "note", style: "padding:0 14px 6px" }, "Partira en réserve (fait maison) : " + reserve.join(", ")) : null,
+    travaux.length
+      ? h("div", { class: "liste-etapes" }, travaux.map((t) => etapePlan(t, a)))
+      : h("div", { class: "vide" }, "Aucune étape ne fabrique cet article : décrivez-la dans Réglages."));
+}
+
+function etapePlan(t, a) {
+  const e = etat.etapes.find((x) => x.id === t.etape_id);
+  const cle = `${a.piece_id}:${t.etape_id}`;
+  const enCours = etat.fait && etat.fait.cle === cle;
+  const autres = t.sert.filter((id) => id !== a.piece_id).map((id) => etat.plan.articles.find((x) => x.piece_id === id)?.nom).filter(Boolean);
+  const donne = t.donne.map((g) => `${g.quantite} ${g.nom}` + (g.reserve > 0 ? ` (dont ${g.reserve} en réserve)` : "")).join(", ")
+    + (t.parts_libres ? ` · ${t.parts_libres} part(s) libre(s), au choix` : "");
+  const entrees = t.entrees.map((x) => {
+    if (x.sans_quantite) return h("li", { class: x.presque_vide ? "manque-txt" : "" }, x.presque_vide ? `⚠ ${x.nom} : pot presque vide` : `✓ ${x.nom}`);
+    if (x.manque > 0) return h("li", { class: "manque-txt" }, `⚠ ${x.besoin} ${x.nom} : il en manque ${x.manque} → à acheter`);
+    if (x.fait_avant > 0) return h("li", {}, `↑ ${x.besoin} ${x.nom}` + (x.en_stock ? ` (${x.en_stock} en stock + ${x.fait_avant} faits juste avant)` : " : faits juste avant"));
+    return h("li", {}, `✓ ${x.besoin} ${x.nom} en stock`);
+  });
+  const pre = { fois: t.fois, donne: Object.fromEntries(e?.donne.some((d) => d.au_choix) ? t.donne.map((g) => [g.piece_id, String(g.quantite)]) : []) };
+  return h("div", { class: "etape" },
+    h("div", { class: "etape-tete" },
+      h("div", {}, h("span", { class: "numero" }, t.numero), " ",
+        h("strong", {}, `${e?.nom ?? "?"} × ${t.fois}`), h("span", { class: "note" }, e?.mode === "par_matiere" ? " (matières entières)" : ""),
+        h("div", { class: "note", style: "font-size:13px" }, "donne " + donne + (autres.length ? ` · sert aussi à : ${autres.join(", ")}` : ""))),
+      h("div", { class: "actions-ligne" },
+        h("span", { class: "note" }, t.temps_min === null ? "temps ?" : dureeTexte(t.temps_min)),
+        enCours || !e ? null : h("button", { class: "btn-sec", disabled: !!etat.fait, onclick: () => ouvrirFait(cle, e, pre) }, "C'est fait…"))),
+    entrees.length ? h("ul", { class: "entrees" }, entrees) : null,
+    enCours ? panneauFait(e) : null);
 }
 
 function carteEtape(e) {
+  const cle = "toutes:" + e.id;
   const utilise = e.utilise.map((u) => u.suivi === "quantite"
     ? h("li", {}, `${u.quantite} ${u.nom}`, h("span", { class: "note" }, ` · en stock : ${stockDe(u.piece_id)}`))
     : h("li", {}, `${u.nom}`, h("span", { class: "note" }, " · sans quantité")));
-  const enCours = etat.fait && etat.fait.etape_id === e.id;
+  const enCours = etat.fait && etat.fait.cle === cle;
   return h("div", { class: "etape" },
     h("div", { class: "etape-tete" },
       h("div", {}, h("strong", {}, e.nom), h("div", { class: "note", style: "font-size:13px" }, (e.mode === "par_matiere" ? "Par matière entière" : "À la pièce") + " · " + texteTemps(e))),
-      enCours ? null : h("button", { class: "btn-sec", disabled: !!etat.fait, onclick: () => { etat.fait = { etape_id: e.id, fois: "1", donne: {}, touche: new Set(), manque: null, comptages: {} }; dessinerAtelier(); } }, "C'est fait…")),
+      enCours ? null : h("button", { class: "btn-sec", disabled: !!etat.fait, onclick: () => ouvrirFait(cle, e) }, "C'est fait…")),
     h("div", { class: "etape-corps" },
       h("div", {}, h("div", { class: "note" }, "Utilise"), utilise.length ? h("ul", {}, utilise) : h("div", {}, "rien")),
       h("div", {}, h("div", { class: "note" }, "Donne"), h("ul", {}, e.donne.map((d) => d.au_choix
@@ -653,8 +752,189 @@ function panneauFait(e) {
   );
 }
 
+// ───────────── Dates ─────────────
+const fmtDate = (d) => new Date(d + "T00:00:00Z").toLocaleDateString("fr-FR", { day: "numeric", month: "short", timeZone: "UTC" });
+const fmtDateLongue = (d) => new Date(d + "T00:00:00Z").toLocaleDateString("fr-FR", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" });
+function joursEntre(a, b) { return Math.round((Date.parse(b + "T00:00:00Z") - Date.parse(a + "T00:00:00Z")) / 86400000); }
+function datesSalon(s) { return s.nb_jours > 1 ? `${fmtDate(s.date_debut)} → ${fmtDate(s.fin)}` : fmtDate(s.date_debut); }
+function nomPreparation(prep, salons) {
+  return prep.salon_ids.map((id) => salons.find((s) => s.id === id)?.nom ?? "?").join(" + ");
+}
+function dureeTexte(min) {
+  if (min < 60) return `${Math.round(min)} min`;
+  const h = Math.floor(min / 60), m = Math.round(min % 60);
+  return m ? `${h} h ${String(m).padStart(2, "0")}` : `${h} h`;
+}
+
+// ───────────── Salons ─────────────
+async function pageSalons() {
+  etat.salons = await api("/salons");
+  dessinerSalons();
+}
+
+function formulaireSalon(s) {
+  const v = s ?? { nom: "", type: "", date_debut: "", nb_jours: 1, frequentation: "" };
+  const champ = (id, label, attrs) => h("label", { for: id }, label, h("input", { id, ...attrs }));
+  const form = h("form", {
+    class: "formulaire",
+    onsubmit: (e) => { e.preventDefault(); tenter(async () => {
+      const f = new FormData(form);
+      const corps = {
+        nom: f.get("nom"), type: f.get("type") || null, date_debut: f.get("date_debut"),
+        nb_jours: Number(f.get("nb_jours") || 1), frequentation: f.get("frequentation") === "" ? null : Number(f.get("frequentation")),
+      };
+      await api(s ? "/salons/" + s.id : "/salons", { method: s ? "PATCH" : "POST", body: corps });
+      etat.salonEdition = null;
+      flash(s ? "Salon modifié." : "Salon ajouté.");
+      await pageSalons();
+    }); },
+  },
+    champ("sn", "Nom", { name: "nom", value: v.nom, placeholder: "ex. Festival de Noël", required: true }),
+    champ("st", "Type", { name: "type", value: v.type ?? "", placeholder: "ex. convention, marché" }),
+    champ("sd", "Premier jour", { name: "date_debut", type: "date", value: v.date_debut, required: true }),
+    champ("sj", "Jours", { name: "nb_jours", type: "number", min: "1", step: "1", value: String(v.nb_jours), style: "width:80px" }),
+    champ("sf", "Fréquentation attendue", { name: "frequentation", type: "number", min: "0", step: "1", value: v.frequentation ?? "", placeholder: "visiteurs", style: "width:150px" }),
+    h("button", { class: "btn" }, s ? "Enregistrer" : "Ajouter"),
+    h("button", { type: "button", class: "btn-sec", onclick: () => { etat.salonEdition = null; dessinerSalons(); } }, "Annuler"),
+  );
+  return form;
+}
+
+function dessinerSalons() {
+  const d = etat.salons;
+  entete("Salons", etat.salonEdition ? null : h("button", { class: "btn", onclick: () => { etat.salonEdition = "nouveau"; dessinerSalons(); } }, "Ajouter un salon"));
+  const page = document.getElementById("page");
+  const aVenir = d.salons.filter((s) => s.fin >= d.aujourdhui);
+  const passes = d.salons.filter((s) => s.fin < d.aujourdhui).reverse();
+  const seuil = d.reglages.regroupement_auto ? `écart de moins de ${d.reglages.seuil_jours} jours` : "regroupement automatique désactivé";
+
+  const ligneSalon = (s) => etat.salonEdition === s.id
+    ? h("div", { class: "salon salon-edition" }, formulaireSalon(s))
+    : h("div", { class: "salon" },
+        h("div", {}, h("strong", {}, s.nom),
+          h("div", { class: "note" }, [datesSalon(s), `${s.nb_jours} jour${s.nb_jours > 1 ? "s" : ""}`, s.type, s.frequentation ? `~${s.frequentation.toLocaleString("fr-FR")} visiteurs` : null].filter(Boolean).join(" · "))),
+        h("div", { class: "actions-ligne" },
+          h("button", { class: "btn-petit", disabled: !!etat.salonEdition, onclick: () => { etat.salonEdition = s.id; dessinerSalons(); } }, "Modifier"),
+          h("button", { class: "btn-petit", disabled: !!etat.salonEdition, onclick: () => tenter(async () => {
+            if (!confirm(`Supprimer le salon « ${s.nom} » ?`)) return;
+            await api("/salons/" + s.id, { method: "DELETE" });
+            flash("Salon supprimé.");
+            await pageSalons();
+          }) }, "Supprimer")));
+
+  const ligneEcart = (s) => h("div", { class: "ecart-salons" },
+    h("span", {}, `${s.ecart_avant} jour${s.ecart_avant > 1 ? "s" : ""} d'écart`),
+    h("strong", {}, s.regroupe ? "Préparés ensemble" : "Préparés séparément"),
+    s.manuel ? h("span", { class: "note" }, "(votre choix)") : null,
+    h("button", { class: "btn-petit", onclick: () => tenter(async () => {
+      await api(`/salons/${s.id}/regroupement`, { method: "PUT", body: { regroupe: !s.regroupe } });
+      await pageSalons();
+    }) }, s.regroupe ? "Séparer" : "Regrouper"),
+    s.manuel ? h("button", { class: "btn-petit", onclick: () => tenter(async () => {
+      await api(`/salons/${s.id}/regroupement`, { method: "PUT", body: { regroupe: null } });
+      await pageSalons();
+    }) }, "Revenir à la proposition") : null);
+
+  const timeline = h("section", { class: "carte" },
+    h("h2", {}, "Prochains salons"),
+    h("p", { class: "note", style: "margin:0;padding:0 14px 8px" },
+      `Les salons trop rapprochés pour refaire du stock entre eux sont préparés ensemble. L'outil propose un regroupement (${seuil}), vous pouvez séparer ou regrouper à la main.`),
+    aVenir.length ? h("div", { class: "timeline" }, aVenir.flatMap((s, i) => [i > 0 ? ligneEcart(s) : null, ligneSalon(s)]))
+      : h("div", { class: "vide" }, "Aucun salon à venir."),
+    etat.salonEdition === "nouveau" ? h("div", { class: "salon-edition" }, formulaireSalon(null)) : null,
+  );
+
+  const prep = d.preparations.find((p) => p.id === d.en_cours);
+  let preparation = null;
+  if (prep) {
+    const premier = d.salons.find((s) => s.id === prep.id);
+    const j = joursEntre(d.aujourdhui, premier.date_debut);
+    const phases = [
+      { label: "Objectifs", fait: prep.nb_objectifs > 0, quand: prep.nb_objectifs ? `${prep.nb_objectifs} fixé(s)` : "à fixer" },
+      { label: "Comptage avant", fait: !!prep.comptage_avant, quand: prep.comptage_avant ? "fait le " + fmtDate(prep.comptage_avant.slice(0, 10)) : "juste avant de charger le stand" },
+      { label: "Bilan", fait: false, quand: "après le salon (avec l'import des ventes)" },
+    ];
+    preparation = h("section", { class: "carte" },
+      h("h2", {}, "Préparation en cours : " + nomPreparation(prep, d.salons)),
+      h("div", { class: "note", style: "padding:0 14px" }, `Tout prêt avant le ${fmtDateLongue(premier.date_debut)} · ${j > 0 ? `dans ${j} jour${j > 1 ? "s" : ""}` : "c'est maintenant"}`),
+      h("ol", { class: "phases" }, phases.map((ph) => h("li", { class: ph.fait ? "fait" : "" }, h("strong", {}, (ph.fait ? "✓ " : "") + ph.label), h("span", { class: "note" }, ph.quand)))),
+      h("div", { class: "formulaire" },
+        h("button", { class: "btn", onclick: () => { location.hash = "objectifs/" + prep.id; } }, "Fixer les objectifs"),
+        h("button", { class: "btn-sec", onclick: () => { location.hash = "stock/avant/" + prep.id; } }, prep.comptage_avant ? "Refaire le comptage avant" : "Faire le comptage avant")),
+    );
+  }
+
+  const tablePasses = h("section", { class: "carte" },
+    h("h2", {}, "Salons passés"),
+    passes.length
+      ? h("table", { class: "tbl" },
+          h("thead", {}, h("tr", {}, ["Salon", "Type", "Jours", "Fréquentation", ""].map((t, i) => h("th", { class: i === 2 || i === 3 ? "num" : null }, t)))),
+          h("tbody", {}, passes.map((s) => etat.salonEdition === s.id
+            ? h("tr", {}, h("td", { colspan: "5" }, formulaireSalon(s)))
+            : h("tr", {},
+                h("td", {}, h("strong", {}, s.nom), h("div", { class: "note" }, datesSalon(s))),
+                h("td", {}, s.type ?? ""), h("td", { class: "num" }, s.nb_jours),
+                h("td", { class: "num" }, s.frequentation ? s.frequentation.toLocaleString("fr-FR") : "—"),
+                h("td", {}, h("div", { class: "actions-ligne" }, h("button", { class: "btn-petit", disabled: !!etat.salonEdition, onclick: () => { etat.salonEdition = s.id; dessinerSalons(); } }, "Modifier")))))))
+      : h("div", { class: "vide" }, "Aucun. Les salons passés servent aux recommandations : saisissez ceux de l'historique (dates, fréquentation)."),
+    h("div", { class: "note", style: "padding:0 14px 14px;font-size:13px" }, "Ventes carte, tampons et bilan arriveront avec l'import SumUp."),
+  );
+
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, preparation, timeline, tablePasses));
+}
+
+// ───────────── Objectifs ─────────────
+async function pageObjectifs(prepId) {
+  etat.objectifs = await api(`/preparations/${prepId}/objectifs`);
+  dessinerObjectifs();
+}
+
+function dessinerObjectifs() {
+  const d = etat.objectifs;
+  const nom = d.salons.map((s) => s.nom).join(" + ");
+  entete("Objectifs · " + nom, h("button", { class: "btn-sec", onclick: () => { location.hash = "salons"; } }, "← Salons"));
+  const page = document.getElementById("page");
+  const marge = Math.round(d.reglages.marge * 100);
+  const premier = d.salons[0];
+
+  const changer = (a, s, valeur) => tenter(async () => {
+    await api("/objectifs", { method: "PUT", body: { salon_id: s.salon_id, piece_id: a.id, retenu: valeur } });
+    s.retenu = valeur === null ? null : Number(valeur);
+    const retenus = a.par_salon.filter((x) => x.retenu !== null).map((x) => x.retenu);
+    a.a_avoir = !retenus.length ? 0 : d.reglages.marge_unique
+      ? Math.ceil(retenus.reduce((x, y) => x + y, 0) * (1 + d.reglages.marge) - 1e-9)
+      : retenus.reduce((t, r) => t + Math.ceil(r * (1 + d.reglages.marge) - 1e-9), 0);
+    dessinerObjectifs();
+  });
+
+  const familles = [...new Set(d.articles.map((a) => a.famille))];
+  const cartes = familles.map((f) => h("section", { class: "carte" },
+    h("h2", {}, f),
+    h("table", { class: "tbl" },
+      h("thead", {}, h("tr", {}, h("th", {}, "Article"), h("th", { class: "num" }, "Prêts"),
+        d.salons.map((s) => h("th", {}, s.nom)), h("th", { class: "num" }, `À avoir le ${fmtDate(premier.date_debut)}`))),
+      h("tbody", {}, d.articles.filter((a) => a.famille === f).map((a) => h("tr", {},
+        h("td", { style: "font-weight:600" }, a.nom),
+        h("td", { class: "num" }, a.stock),
+        a.par_salon.map((s) => h("td", {}, h("div", { class: "pas" },
+          h("button", { class: "btn-petit", "aria-label": "Moins", disabled: !s.retenu, onclick: () => changer(a, s, Math.max(0, (s.retenu ?? 0) - 1)) }, "−"),
+          h("input", { class: "compte", type: "number", min: "0", step: "1", value: s.retenu ?? "", placeholder: "—", "aria-label": `Objectif ${a.nom}`,
+            onchange: (e) => changer(a, s, e.target.value === "" ? null : Number(e.target.value)) }),
+          h("button", { class: "btn-petit", "aria-label": "Plus", onclick: () => changer(a, s, (s.retenu ?? 0) + 1) }, "+"),
+          h("span", { class: "note", style: "font-size:12px" }, s.conseille === null ? "" : "conseillé " + s.conseille)))),
+        h("td", { class: "num qte" }, a.a_avoir || "—")))))));
+
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" },
+    h("p", { class: "note", style: "margin:0" },
+      `Fixez combien vous voulez vendre de chaque article à chaque salon. « À avoir » = la somme + ${marge} % de marge${d.reglages.marge_unique ? ", appliquée une seule fois pour la préparation" : ""}. ` +
+      "Les objectifs conseillés (calculés à partir des tampons et des salons passés) arriveront avec l'import des ventes SumUp ; en attendant, vous les fixez à la main."),
+    d.articles.length ? cartes : h("div", { class: "carte" }, h("div", { class: "vide" }, "Aucun article à vendre. Créez-les dans Réglages.")),
+    h("div", { class: "barre-comptage" }, h("button", { class: "btn", onclick: () => { location.hash = "atelier"; } }, "Voir ce qu'il reste à faire")),
+  ));
+}
+
 window.addEventListener("hashchange", () => {
-  Object.assign(etat, { comptage: null, ligneEnCours: null, edition: null, editeur: null, fait: null });
+  Object.assign(etat, { comptage: null, ligneEnCours: null, edition: null, editeur: null, fait: null, salonEdition: null, comptageAvant: null });
   afficher();
 });
 afficher();

@@ -48,13 +48,13 @@ Quantités toujours **entières**. Une fraction (« 1/45 de feuille de stickers 
 **question** — en attente sur l'écran Questions : `vente_impossible`, `nom_inconnu`, `remboursement`, `etape_depasse_stock` ; pièce, détail, date, réponse, date de réponse.
 
 ## Salons et préparations
-**salon** — nom, type, date de début, nombre de jours, fréquentation attendue, montant espèces (saisi au bilan).
+**salon** — nom, type, date de début, nombre de jours, fréquentation attendue, tampons prévus, montant espèces (saisi au bilan), `regroupe_avec_precedent` (oui / non / vide = proposition automatique).
 
-**preparation** — regroupement de salons ; `auto` (proposé par le seuil) ou `manuel` (Séparer / Regrouper), marge.
+Les **préparations ne sont pas stockées** : elles se déduisent des dates et du seuil (écart entre la fin d'un salon et le début du suivant < seuil → préparés ensemble), corrigées par le choix manuel de chaque salon. Pas de données à resynchroniser quand une date change. Une préparation est désignée par son premier salon. La marge est un réglage.
 
-**objectif** — préparation, salon, article : tampons prévus, conseillé (calcul conservé pour l'affichage), retenu.
+**objectif** — salon, article : conseillé (calcul conservé pour l'affichage), retenu. Objectif d'une préparation = somme des retenus de ses salons, + marge.
 
-**comptage** — date, type (`libre`, `avant`), préparation / salon concerné.
+**comptage** — date, type (`libre`, `avant`), salon (comptage avant : premier salon de la préparation).
 **comptage_ligne** — pièce, attendu, compté (→ mouvement de la différence).
 
 **bilan_article** — salon, article : « mal exposé ou épuisé » (exclut de la recommandation) ; 
