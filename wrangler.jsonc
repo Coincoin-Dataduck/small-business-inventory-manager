@@ -3,15 +3,17 @@
   "name": "stock-hervine",
   "main": "src/index.ts",
   "compatibility_date": "2026-11-01",
-  "assets": { "directory": "public", "not_found_handling": "single-page-application", "run_worker_first": ["/api/*"] },
+  "workers_dev": true,
+  "preview_urls": false,
+  // Les 3 fichiers de l'interface sont intégrés au Worker (importés comme texte), pas envoyés comme « assets ».
+  "rules": [{ "type": "Text", "globs": ["**/public/*.html", "**/public/*.css", "**/public/app.js"], "fallthrough": false }],
   // Import SumUp toutes les 15 minutes (par tranches de ~40 ventes).
   "triggers": { "crons": ["*/15 * * * *"] },
   "d1_databases": [
     {
       "binding": "DB",
       "database_name": "stock-hervine",
-      // À remplacer par l'identifiant donné par `wrangler d1 create stock-hervine` au premier déploiement.
-      "database_id": "00000000-0000-0000-0000-000000000000",
+      "database_id": "68110d74-14e4-4f86-9e9d-994259ceb6f3",
       "migrations_dir": "migrations"
     }
   ]

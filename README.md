@@ -18,3 +18,11 @@ npm run db:local   # crée la base locale (migrations/)
 npm run dev        # http://localhost:8787
 ```
 Structure : `src/index.ts` (API du Worker), `public/` (pages), `migrations/` (base D1, voir `docs/donnees.md`).
+
+## En ligne
+- Adresse : https://stock-hervine.clef-fontaine.workers.dev (fermée tant que Cloudflare Access n'est pas activé).
+- Base D1 `stock-hervine` (Europe de l'Ouest). Import SumUp toutes les 15 minutes (cron).
+- Secret du Worker à saisir dans le tableau de bord Cloudflare : `SUMUP_API_KEY`.
+- Variables `ACCESS_TEAM_DOMAIN` et `ACCESS_AUD` dans `wrangler.jsonc` une fois Access activé.
+- Déployer depuis une session cloud : `CLOUDFLARE_API_TOKEN=proxy-injected CLOUDFLARE_ACCOUNT_ID=<id> npx wrangler deploy`.
+- En local, sans Access : `ACCES_LOCAL_SANS_CONTROLE=1` dans `.dev.vars` (jamais en ligne).

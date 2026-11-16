@@ -8,6 +8,18 @@ import { questions } from "./questions";
 import { bilan } from "./bilan";
 import { achats } from "./achats";
 import { importer } from "./sumup";
+import { controlerAcces } from "./acces";
+// @ts-expect-error : importé comme texte (règle « Text » de wrangler.jsonc)
+import PAGE from "../public/index.html";
+// @ts-expect-error : idem
+import STYLE from "../public/style.css";
+// @ts-expect-error : idem
+import SCRIPT from "../public/app.js";
+
+const FICHIERS: Record<string, [string, string]> = {
+  "/style.css": [STYLE as string, "text/css; charset=utf-8"],
+  "/app.js": [SCRIPT as string, "text/javascript; charset=utf-8"],
+};
 const app = new Hono<{ Bindings: Env }>().basePath("/api");
 
 // ───────────── Familles ─────────────
@@ -145,7 +157,14 @@ app.onError((e, c) => {
 app.notFound((c) => c.json({ erreur: "Adresse inconnue." }, 404));
 
 export default {
-  fetch: app.fetch,
+  // Tout passe par le verrou Access, pages comprises ; puis l'API ou les fichiers de l'interface.
+  async fetch(req: Request, env: Env, ctx: ExecutionContext) {
+    const refus = await controlerAcces(req, env);
+    if (refus) return refus;
+    if (new URL(req.url).pathname.startsWith("/api/")) return app.fetch(req, env, ctx);
+    const [contenu, type] = FICHIERS[new URL(req.url).pathname] ?? [PAGE as string, "text/html; charset=utf-8"];
+    return new Response(contenu, { headers: { "Content-Type": type, "Cache-Control": "no-cache" } });
+  },
   // Cron : import des ventes SumUp par tranches.
   async scheduled(_evt: ScheduledController, env: Env, ctx: ExecutionContext) {
     ctx.waitUntil(importer(env, 40).then((b) => { if (b.erreur) console.error("Import SumUp :", b.erreur); }));
