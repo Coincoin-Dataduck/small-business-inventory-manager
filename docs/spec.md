@@ -20,6 +20,8 @@ Validée question par question avec Clément (novembre 2026). Les « ? » sont d
 - Ventes importées automatiquement depuis **SumUp**. Ko-fi abandonné.
   - **V1 : caisse au stand uniquement.** La boutique en ligne n'est pas encore ouverte ; le format de ses commandes est inconnu (à vérifier par une commande test à l'ouverture).
   - **Espèces : hors SumUp** (fonction payante non prise) ; notées sur une table manuscrite. Elles ne décrémentent donc pas le stock : c'est le **comptage au retour** de chaque salon qui recale « à vendre ». Ventes réelles d'un article sur un salon = avant + fabriqué − après ; SumUp ne donne que la part carte.
+  - Le comptage au retour porte sur **tout le stock** (validé) : ventes réelles de chaque article = avant + fabriqué − après.
+  - La table manuscrite des espèces donne les **quantités par article** (validé) → saisie **facultative** « ventes en espèces » au bilan. Elle ne change pas les ventes (déjà connues par le comptage) ; elle sert de **contrôle** : carte + espèces ≈ écart compté. Un écart restant = fabrication non notée, perte ou erreur de comptage.
   - Le contrôle de cohérence des tampons doit afficher que l'écart SumUp / comptage **inclut les espèces** (ce n'est pas une anomalie).
 - Une vente (carte) décrémente le stock « à vendre ».
 - Seuls les paiements **réussis** (`SUCCESSFUL`) comptent : les paiements refusés arrivent aussi avec leurs articles.
@@ -95,5 +97,4 @@ Encre d'imprimante (EcoTank ET8550), encre de linogravure, emballage de la Colle
 - Prints : à « C'est fait », on indique quels dessins sont sortis de la feuille (validé).
 - Temps réels par étape ; délais fournisseurs.
 - Test API SumUp (16/11/2026, 100 transactions, caisse uniquement) : détail des articles **oui** en caisse (transaction complète et reçu identiques) ; **pas d'identifiant** d'article ; catalogue non accessible par l'API (404). Restent inconnus : commandes en ligne, remises, remboursements.
-- Comptage au retour de salon : porte-t-il sur tout le stand ou seulement les tampons ? La table manuscrite des espèces note-t-elle les articles ou seulement les montants (→ saisie facultative « ventes en espèces » au bilan) ?
 - Nettoyage SumUp (indépendant de l'outil) : article à prix fixe « tampon + encreur » et lots à prix fixes (plus de saisie libre), retirer l'option « Encreur » de la Collection, stocks négatifs à recaler au premier comptage.

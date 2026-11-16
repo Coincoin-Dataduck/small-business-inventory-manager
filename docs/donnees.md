@@ -57,7 +57,7 @@ Quantités toujours **entières**. Une fraction (« 1/45 de feuille de stickers 
 **comptage** — date, type (`libre`, `avant`, `retour`), préparation / salon concerné.
 **comptage_ligne** — pièce, attendu, compté (→ mouvement de la différence).
 
-**bilan_article** — salon, article : « mal exposé ou épuisé » (exclut de la recommandation).
+**bilan_article** — salon, article : « mal exposé ou épuisé » (exclut de la recommandation) ; ventes en espèces (facultatif, recopié de la table manuscrite, sert au contrôle carte + espèces ≈ écart compté).
 
 ## Achats
 **commande** — pièce, quantité, taille de lot, date, `commande` → `recu` (→ mouvement de réception).
