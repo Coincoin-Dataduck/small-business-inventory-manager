@@ -17,14 +17,21 @@ Validée question par question avec Clément (novembre 2026). Les « ? » sont d
 - Rendements variables (ex. gomme : ~150 tampons par feuille) : valeur de départ, affinée par les quantités réellement déclarées.
 
 ## 2. Ventes et corrections
-- Ventes importées automatiquement depuis **SumUp** (caisse au stand + boutique en ligne). Ko-fi abandonné.
-- Une vente décrémente le stock « à vendre ».
+- Ventes importées automatiquement depuis **SumUp**. Ko-fi abandonné.
+  - **V1 : caisse au stand uniquement.** La boutique en ligne n'est pas encore ouverte ; le format de ses commandes est inconnu (à vérifier par une commande test à l'ouverture).
+  - **Espèces : hors SumUp** (fonction payante non prise) ; notées sur une table manuscrite. Elles ne décrémentent donc pas le stock : c'est le **comptage au retour** de chaque salon qui recale « à vendre ». Ventes réelles d'un article sur un salon = avant + fabriqué − après ; SumUp ne donne que la part carte.
+  - Le contrôle de cohérence des tampons doit afficher que l'écart SumUp / comptage **inclut les espèces** (ce n'est pas une anomalie).
+- Une vente (carte) décrémente le stock « à vendre ».
+- Seuls les paiements **réussis** (`SUCCESSFUL`) comptent : les paiements refusés arrivent aussi avec leurs articles.
+- **Correspondance SumUp ↔ article** : SumUp ne donne aucun identifiant d'article, seulement un nom et parfois une description (variante, ex. « Boucles d'oreilles » / « GRANDES » ; ailleurs la variante est dans le nom : « Mini-presse à fleurs - Sauge »). Clé = nom + description nettoyés (espaces, casse). Table de correspondance éditable ; « Tampon unité » et « Tampon lot » → article générique des tampons ; les articles en fin de série sont reliés aussi.
+- **Remboursement** : pose une question (« l'article est-il revenu en stock ? »), pas de remise en stock automatique. Remises et remboursements jamais observés dans SumUp : format à vérifier au premier cas réel.
+- **Import par tranches** : le détail des articles demande un appel par transaction, et le Worker gratuit est limité à 50 appels externes par exécution. L'import traite ~40 ventes par passage et reprend où il s'est arrêté.
 - **Une seule façon de corriger un chiffre : Compter** (« combien en avez-vous vraiment ? »), déclenchée :
   - par un comptage (global ou d'une famille) ;
   - par une **vente impossible** (SumUp vend un article à stock 0 → question anti-oubli : « vous en avez sûrement fabriqué sans le noter, combien en aviez-vous ? ») ;
   - par une étape qui utilise plus de pièces que le stock (« selon l'outil il ne restait que 3 attaches ; combien en aviez-vous vraiment ? »).
 - **Tampons** : un seul article générique à la caisse ; le suivi par motif se fait par comptage avant / après salon. Ventes d'un motif = avant + fabriqué − après. Vérification : unités + 4 × lots + 20 × collections + tampons des gachapons ≈ écart compté.
-- Nouvel article vu dans SumUp → « dans quelle famille le mettre ? » (ou « ne pas suivre »).
+- Nom inconnu vu dans SumUp → « quel article est-ce ? » (article existant, nouvel article d'une famille, ou « ne pas suivre ») ; la réponse est mémorisée dans la correspondance.
 
 ## 3. Salons et préparations
 - **Tout tourne autour des salons** : pas de stock minimum hors salon.
@@ -85,5 +92,6 @@ Encre d'imprimante (EcoTank ET8550), encre de linogravure, emballage de la Colle
 - Rendements : planche de carton → combien de cartons ? cartonnettes par feuille ?
 - Pochette du kit : kraft ou autre papier ?
 - Temps réels par étape ; délais fournisseurs.
-- Résultats du test API SumUp (détail des articles en ligne ? identifiants ? remises / remboursements ?).
+- Test API SumUp (16/11/2026, 100 transactions, caisse uniquement) : détail des articles **oui** en caisse (transaction complète et reçu identiques) ; **pas d'identifiant** d'article ; catalogue non accessible par l'API (404). Restent inconnus : commandes en ligne, remises, remboursements.
+- Comptage au retour de salon : porte-t-il sur tout le stand ou seulement les tampons ? La table manuscrite des espèces note-t-elle les articles ou seulement les montants (→ saisie facultative « ventes en espèces » au bilan) ?
 - Nettoyage SumUp (indépendant de l'outil) : article à prix fixe « tampon + encreur » et lots à prix fixes (plus de saisie libre), retirer l'option « Encreur » de la Collection, stocks négatifs à recaler au premier comptage.

@@ -6,6 +6,7 @@ Conception : `docs/`. Consignes pour Claude Code : `CLAUDE.md`.
 ## Démarrage dans Claude Code sur le web
 Environnement cloud personnel :
 - Accès réseau **Custom** : domaines par défaut + `api.sumup.com`, `api.cloudflare.com`
-- Variables : `SUMUP_API_KEY`, `CLOUDFLARE_API_TOKEN` (droits Workers + D1), `CLOUDFLARE_ACCOUNT_ID`
+- Clés : enregistrées comme **secrets réseau** de l'environnement (hôte `api.sumup.com`, en-tête `Authorization`, préfixe `Bearer` ; idem plus tard pour `api.cloudflare.com`). Le réseau de la session ajoute la clé aux appels : aucune variable ne la contient.
+- Variable simple (non secrète) à prévoir pour le déploiement : `CLOUDFLARE_ACCOUNT_ID`
 
-Première commande : `python3 scripts/test_sumup.py`
+Test SumUp : `SUMUP_API_KEY=proxy-injected python3 scripts/test_sumup.py` (valeur bidon, remplacée par la vraie clé au passage).

@@ -22,7 +22,7 @@ La conception a été faite et validée en amont, dans une conversation sur clau
 ## Architecture retenue
 - **Cloudflare (gratuit)** : un Worker (API + pages), base **D1** (SQLite), **Cron Trigger** pour importer les ventes SumUp, accès protégé par **Cloudflare Access**.
 - Déploiement : `wrangler` avec `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` (variables d'environnement de la session), ou Workers Builds branché sur ce dépôt.
-- Secrets : `SUMUP_API_KEY` en secret du Worker (`wrangler secret put`), **jamais dans le dépôt**. En local / en session : variable d'environnement.
+- Secrets : `SUMUP_API_KEY` en secret du Worker (`wrangler secret put`), **jamais dans le dépôt**. En session cloud : secret réseau de l'environnement, injecté par le proxy (lancer les scripts avec `SUMUP_API_KEY=proxy-injected`). En local : variable d'environnement.
 - Rien n'est codé en dur côté métier : articles, familles, étapes, rendements, temps, salons sont des données éditables (écran Réglages).
 
 ## Première tâche
