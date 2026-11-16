@@ -1021,7 +1021,7 @@ function dessinerQuestions() {
   // Noms inconnus : une carte par nom, ses variantes (options SumUp) dedans.
   const groupes = new Map();
   for (const q of etat.questions.filter((q) => q.type === "nom_inconnu")) {
-    const k = q.detail.nom.trim().toLowerCase() + "#" + nbCouleurs(q.detail.description);
+    const k = cleGroupe(q.detail);
     (groupes.get(k) ?? groupes.set(k, []).get(k)).push(q);
   }
   etat.selection ??= new Set();
@@ -1054,9 +1054,15 @@ function texteCouleurs(n) {
   return n === 0 ? "" : n === 1 ? " + 1 couleur (encreur)" : ` + ${n} couleurs (encreurs)`;
 }
 
+// Regroupement : les couleurs (encreurs) se regroupent par nombre ; toute autre option (A5, grandes…) est un article à part.
+function cleGroupe(d) {
+  const n = nbCouleurs(d.description);
+  return d.nom.trim().toLowerCase() + "#" + (n ? "c" + n : (d.description ?? "").trim().toLowerCase());
+}
+
 function carteGroupeNom(groupe) {
   const n = nbCouleurs(groupe[0].detail.description);
-  const cle = "g:" + groupe[0].detail.nom.trim().toLowerCase() + "#" + n;
+  const cle = "g:" + cleGroupe(groupe[0].detail);
   const b = brouillons.get(cle) ?? brouillons.set(cle, { lignes: [{ piece_id: null, quantite: 1 }], tampons: "0", choisies: new Set(groupe.map((q) => q.id)) }).get(cle);
   const ids = groupe.map((q) => q.id);
   const toutesSel = ids.every((id) => etat.selection.has(id));
@@ -1083,7 +1089,7 @@ function carteGroupeNom(groupe) {
     : null;
   return h("section", { class: "carte" + (toutesSel ? " selectionnee" : "") },
     h("div", { class: "tete-article" },
-      h("h2", { style: "padding:0" }, `SumUp vend « ${groupe[0].detail.nom} »${texteCouleurs(n)}`),
+      h("h2", { style: "padding:0" }, `SumUp vend « ${groupe[0].detail.nom}${!n && groupe[0].detail.description ? " · " + groupe[0].detail.description : ""} »${texteCouleurs(n)}`),
       h("label", { class: "ligne-editeur note" }, h("input", { type: "checkbox", checked: toutesSel, onchange: (e) => {
         ids.forEach((id) => (e.target.checked ? etat.selection.add(id) : etat.selection.delete(id)));
         dessinerQuestions();
@@ -1094,10 +1100,10 @@ function carteGroupeNom(groupe) {
       variantes,
       h("div", {}, "Quel article est-ce ? Une vente retirera ces pièces du stock :"),
       lignesPieces(b.lignes, "Pièce retirée du stock"),
+      creationRapide(b, n ? groupe[0].detail.nom : [groupe[0].detail.nom, groupe[0].detail.description].filter(Boolean).join(" ")),
       h("label", { class: "ligne-editeur" }, "Compte pour",
         h("input", { type: "number", min: "0", step: "1", class: "compte", value: b.tampons, oninput: (e) => { b.tampons = e.target.value; } }),
         h("span", { class: "note" }, "tampon(s) dans le contrôle des tampons (0 si ce n'est pas un tampon ; lot = 4, collection = 20)")),
-      h("div", { class: "note", style: "font-size:13px" }, "Article absent de la liste ? Créez-le d'abord dans ", h("a", { href: "#reglages" }, "Réglages"), "."),
       h("div", { class: "barre-comptage" },
         h("button", { class: "btn-sec", onclick: () => repondre({ ne_pas_suivre: true }, (r) => `${r.noms} nom(s) marqué(s) « Ne pas suivre ».`) }, "Ne pas suivre"),
         h("button", { class: "btn", onclick: () => {
@@ -1105,6 +1111,41 @@ function carteGroupeNom(groupe) {
           repondre({ pieces: b.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })), equivalent_tampons: Number(b.tampons || 0) },
             (r) => `Enregistré pour ${r.noms} nom(s). ${r.ventes_appliquees} vente(s) retirée(s) du stock ; les ventes antérieures au début du suivi d'une pièce ne servent qu'aux statistiques.`);
         } }, "Enregistrer"))));
+}
+
+// « Créer cet article » sans quitter la question : famille existante ou nouvelle, puis l'article est choisi dans la réponse.
+function creationRapide(b, nomPropose) {
+  if (!b.creation) {
+    return h("div", {}, h("button", { type: "button", class: "btn-petit", onclick: () => {
+      b.creation = { nom: nomPropose.replace(/\s+-\s+print fine art/i, "").trim(), famille: etat.stock[0]?.id ? String(etat.stock[0].id) : "nouvelle", nouvelleFamille: "", niveau: "a_vendre", suivi: "quantite" };
+      dessinerQuestions();
+    } }, "+ Créer cet article"));
+  }
+  const c = b.creation;
+  const fam = h("select", { "aria-label": "Famille", onchange: (e) => { c.famille = e.target.value; dessinerQuestions(); } },
+    etat.stock.map((f) => h("option", { value: String(f.id), selected: c.famille === String(f.id) }, f.nom)),
+    h("option", { value: "nouvelle", selected: c.famille === "nouvelle" }, "+ nouvelle famille…"));
+  return h("div", { class: "choix-editeur" },
+    h("strong", {}, "Nouvel article"),
+    h("div", { class: "ligne-editeur" },
+      h("input", { value: c.nom, "aria-label": "Nom de l'article", style: "min-width:240px", oninput: (e) => { c.nom = e.target.value; } }),
+      fam,
+      c.famille === "nouvelle" ? h("input", { value: c.nouvelleFamille, placeholder: "nom de la famille", "aria-label": "Nouvelle famille", oninput: (e) => { c.nouvelleFamille = e.target.value; } }) : null,
+      h("select", { "aria-label": "Type", onchange: (e) => { c.niveau = e.target.value; } }, Object.entries(NIVEAUX).map(([k, v]) => h("option", { value: k, selected: c.niveau === k }, v))),
+      h("select", { "aria-label": "Suivi", onchange: (e) => { c.suivi = e.target.value; } }, Object.entries(SUIVIS).map(([k, v]) => h("option", { value: k, selected: c.suivi === k }, v)))),
+    h("div", { class: "ligne-editeur" },
+      h("button", { type: "button", class: "btn", onclick: () => tenter(async () => {
+        let famille_id = Number(c.famille);
+        if (c.famille === "nouvelle") famille_id = (await api("/familles", { method: "POST", body: { nom: c.nouvelleFamille, ordre: etat.stock.length } })).id;
+        const { id } = await api("/pieces", { method: "POST", body: { nom: c.nom, famille_id, niveau: c.niveau, suivi: c.suivi } });
+        etat.stock = await api("/stock");
+        const vide = b.lignes.find((l) => !l.piece_id);
+        if (vide) vide.piece_id = id; else b.lignes.push({ piece_id: id, quantite: 1 });
+        b.creation = null;
+        flash(`« ${c.nom} » créé et choisi ci-dessus. Vérifiez puis « Enregistrer ».`);
+        dessinerQuestions();
+      }) }, "Créer"),
+      h("button", { type: "button", class: "btn-sec", onclick: () => { b.creation = null; dessinerQuestions(); } }, "Annuler")));
 }
 
 function lignesPieces(etatLignes, label) {
