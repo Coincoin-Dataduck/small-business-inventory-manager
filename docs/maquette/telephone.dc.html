@@ -1,0 +1,364 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Stock Hervine — téléphone</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+button,input{font-family:inherit}
+</style>
+</helmet>
+<div style="width: 100%; height: 100vh; display: flex; flex-direction: column; background: #F6F1E8; color: #2A2522; font-family: Inter, system-ui, sans-serif; font-size: 15px; overflow: hidden">
+
+<header style="padding: 16px 18px 12px; border-bottom: 1px solid #E2D6C3; display: flex; flex-direction: column; gap: 4px">
+<div style="font-family: 'Courier Prime', monospace; font-size: 13px; letter-spacing: .08em; text-transform: uppercase; color: #6B5D4F">Atelier d'Hervine</div>
+<h1 style="margin: 0; font-family: 'Courier Prime', monospace; font-size: 26px">{{title}}</h1>
+<div style="font-size: 13px; color: #4A4038">On prépare : <strong>{{prepName}}</strong> · avant le 12/12 (J-26)</div>
+</header>
+
+<main style="flex: 1 1 auto; overflow-y: auto; padding: 14px 14px 24px; display: flex; flex-direction: column; gap: 14px">
+
+<sc-if value="{{hasFlash}}" hint-placeholder-val="{{ false }}"><section style="background: #EAF3EC; border: 1px solid #9CC2A8; border-radius: 12px; padding: 10px 12px; color: #1F5135; font-size: 14px">{{flash}}</section></sc-if>
+
+<!-- ======== À FAIRE ======== -->
+<sc-if value="{{isTodo}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 14px">
+<sc-for list="{{plans}}" as="pl" hint-placeholder-count="3">
+<section style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 14px; overflow: hidden">
+<div style="padding: 12px 14px; background: #FBF8F2; border-bottom: 1px solid #F0E8DA; display: flex; flex-direction: column; gap: 2px">
+<div style="display: flex; justify-content: space-between; gap: 8px"><strong>{{pl.name}}</strong><span style="font-weight: 700; color: #8A3E0E; white-space: nowrap">il en manque {{pl.missing}}</span></div>
+<span style="font-size: 13px; color: #4A4038">{{pl.reserve}}</span>
+</div>
+<sc-for list="{{pl.steps}}" as="sp" hint-placeholder-count="2">
+<div style="padding: 12px 14px; border-bottom: 1px solid #F0E8DA; display: flex; flex-direction: column; gap: 8px">
+<div style="display: flex; gap: 10px; align-items: flex-start">
+<span style="flex: 0 0 26px; height: 26px; border-radius: 999px; background: #EFE4D2; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 13px">{{sp.n}}</span>
+<div style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 3px">
+<strong style="font-size: 15px">{{sp.label}}</strong>
+<span style="font-size: 13px; color: #4A4038">{{sp.gives}} · {{sp.time}}</span>
+<sc-for list="{{sp.inputs}}" as="ip" hint-placeholder-count="2">
+<sc-if value="{{ip.ok}}" hint-placeholder-val="{{ true }}"><span style="font-size: 13px">✓ {{ip.text}}</span></sc-if>
+<sc-if value="{{ip.made}}" hint-placeholder-val="{{ false }}"><span style="font-size: 13px; color: #3F5F7A">↑ {{ip.text}}</span></sc-if>
+<sc-if value="{{ip.short}}" hint-placeholder-val="{{ false }}"><span style="font-size: 13px; color: #8A3E0E; font-weight: 600">⚠ {{ip.text}}</span></sc-if>
+</sc-for>
+</div>
+</div>
+<sc-if value="{{sp.closed}}" hint-placeholder-val="{{ true }}"><button onClick="{{sp.open}}" style="min-height: 44px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 700; cursor: pointer">C'est fait…</button></sc-if>
+<sc-if value="{{sp.editing}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 8px; background: #F6F1E8; border-radius: 10px; padding: 10px 12px">
+<sc-if value="{{sp.askQty}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="m-qty" style="font-weight: 700">{{sp.qtyLabel}}</label>
+<span style="font-size: 13px; color: #4A4038">{{sp.unitLabel}}</span>
+<div style="display: flex; gap: 8px">
+<input id="m-qty" type="number" inputmode="numeric" min="1" value="{{qty}}" onChange="{{onQty}}" placeholder="{{sp.placeholder}}" style="flex: 1 1 auto; min-height: 48px; border: 1px solid #B9A88F; border-radius: 10px; padding: 0 12px; font-size: 18px; background: #FFFFFF; color: #2A2522">
+<button onClick="{{sp.save}}" style="min-height: 48px; padding: 0 16px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 700; cursor: pointer">OK</button>
+</div>
+<sc-if value="{{sp.hasWarn}}" hint-placeholder-val="{{ false }}"><div style="font-size: 14px; color: #8A3E0E; font-weight: 600">⚠ {{sp.warn}}</div></sc-if>
+<button onClick="{{sp.cancel}}" style="align-self: flex-start; min-height: 36px; padding: 0 4px; border: 0; background: transparent; color: #4A4038; text-decoration: underline; cursor: pointer">Annuler</button>
+</div>
+</sc-if>
+<sc-if value="{{sp.askReal}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="font-weight: 700; color: #8A3E0E">{{sp.realMsg}}</div>
+<label for="m-real" style="font-size: 14px">{{sp.realLabel}}</label>
+<div style="display: flex; gap: 8px">
+<input id="m-real" type="number" inputmode="numeric" min="0" value="{{real}}" onChange="{{onReal}}" style="flex: 1 1 auto; min-height: 48px; border: 1px solid #B9A88F; border-radius: 10px; padding: 0 12px; font-size: 18px; background: #FFFFFF; color: #2A2522">
+<button onClick="{{sp.saveReal}}" style="min-height: 48px; padding: 0 16px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 700; cursor: pointer">OK</button>
+</div>
+<button onClick="{{sp.backQty}}" style="align-self: flex-start; min-height: 36px; padding: 0 4px; border: 0; background: transparent; color: #4A4038; text-decoration: underline; cursor: pointer">Je me suis trompé de nombre</button>
+</div>
+</sc-if>
+</div>
+</sc-if>
+</div>
+</sc-for>
+</section>
+</sc-for>
+<sc-if value="{{hasDone}}" hint-placeholder-val="{{ false }}"><div style="font-size: 14px; color: #1F5135"><strong>Déjà prêt :</strong> {{doneList}}</div></sc-if>
+</div>
+</sc-if>
+
+<!-- ======== COMPTER ======== -->
+<sc-if value="{{isCount}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 12px">
+<p style="margin: 0; font-size: 14px; color: #4A4038; line-height: 1.4">Ajustez au chiffre que vous voyez. Les écarts avec l'outil sont soulignés. Ne comptez que ce que vous voulez.</p>
+<div style="display: flex; gap: 6px; overflow-x: auto; padding-bottom: 4px">
+<sc-for list="{{famFilters}}" as="ff" hint-placeholder-count="6">
+<sc-if value="{{ff.sel}}" hint-placeholder-val="{{ false }}"><button onClick="{{ff.pick}}" style="flex: 0 0 auto; min-height: 38px; padding: 0 12px; border: 0; border-radius: 999px; background: #2A2522; color: #FFFFFF; font-weight: 600; cursor: pointer">{{ff.name}}</button></sc-if>
+<sc-if value="{{ff.unsel}}" hint-placeholder-val="{{ true }}"><button onClick="{{ff.pick}}" style="flex: 0 0 auto; min-height: 38px; padding: 0 12px; border: 1px solid #B9A88F; border-radius: 999px; background: #FFFDF9; color: #2A2522; cursor: pointer">{{ff.name}}</button></sc-if>
+</sc-for>
+</div>
+<section style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 14px; padding: 4px 12px">
+<sc-for list="{{countRows}}" as="r" hint-placeholder-count="6">
+<div style="display: flex; align-items: center; gap: 8px; min-height: 58px; border-bottom: 1px solid #F0E8DA">
+<div style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; min-width: 0">
+<span style="font-weight: 600; font-size: 14px">{{r.name}}</span>
+<span style="font-size: 12px; color: #6B5D4F">{{r.kind}} · l'outil pense {{r.theo}}</span>
+</div>
+<button onClick="{{r.dec}}" aria-label="Moins de {{r.name}}" style="width: 44px; height: 44px; border: 1px solid #B9A88F; border-radius: 10px; background: #FFFFFF; color: #2A2522; font-size: 20px; cursor: pointer">−</button>
+<sc-if value="{{r.same}}" hint-placeholder-val="{{ true }}"><span style="min-width: 34px; text-align: center; font-weight: 700; font-size: 17px">{{r.n}}</span></sc-if>
+<sc-if value="{{r.diff}}" hint-placeholder-val="{{ false }}"><span style="min-width: 34px; text-align: center; font-weight: 700; font-size: 17px; color: #8A3E0E; text-decoration: underline">{{r.n}}</span></sc-if>
+<button onClick="{{r.inc}}" aria-label="Plus de {{r.name}}" style="width: 44px; height: 44px; border: 1px solid #B9A88F; border-radius: 10px; background: #FFFFFF; color: #2A2522; font-size: 20px; cursor: pointer">+</button>
+</div>
+</sc-for>
+</section>
+<button onClick="{{saveCount}}" style="min-height: 50px; border: 0; border-radius: 12px; background: #2A2522; color: #FFFFFF; font-weight: 700; font-size: 16px; cursor: pointer">Enregistrer ({{countDiffs}} écart(s))</button>
+</div>
+</sc-if>
+
+<!-- ======== QUESTIONS ======== -->
+<sc-if value="{{isAsk}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 12px">
+<sc-if value="{{showAlert}}" hint-placeholder-val="{{ true }}">
+<section style="background: #FFF4E8; border: 1.5px solid #C2611F; border-radius: 14px; padding: 14px; display: flex; flex-direction: column; gap: 10px">
+<strong style="color: #8A3E0E; font-size: 14px">Question 1 sur 8</strong>
+<p style="margin: 0; line-height: 1.4">SumUp a vendu <strong>2 Sieste dans les pâquerettes A5</strong> alors qu'il n'en restait plus. Combien en aviez-vous vraiment ?</p>
+<div style="display: flex; gap: 8px">
+<label for="m-al" style="position: absolute; left: -9999px">Nombre réel</label>
+<input id="m-al" type="number" inputmode="numeric" min="0" value="{{alertQty}}" onChange="{{onAlertQty}}" placeholder="ex. 4" style="flex: 1 1 auto; min-height: 48px; border: 1px solid #B9A88F; border-radius: 10px; padding: 0 12px; font-size: 18px; background: #FFFFFF; color: #2A2522">
+<button onClick="{{validateAlert}}" style="min-height: 48px; padding: 0 16px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 700; cursor: pointer">OK</button>
+</div>
+</section>
+</sc-if>
+<sc-if value="{{noAlert}}" hint-placeholder-val="{{ false }}"><div style="padding: 10px 4px; color: #1F5135; font-weight: 600">Plus de question pour l'instant.</div></sc-if>
+<p style="margin: 0; font-size: 13px; color: #6B5D4F; line-height: 1.45">Les achats, les salons, les objectifs et les réglages se font sur ordinateur.</p>
+</div>
+</sc-if>
+
+</main>
+
+<nav aria-label="Écrans" style="display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); border-top: 1px solid #E2D6C3; background: #FFFDF9; padding: 6px 6px 14px">
+<sc-for list="{{tabs}}" as="t" hint-placeholder-count="3">
+<sc-if value="{{t.on}}" hint-placeholder-val="{{ false }}"><button onClick="{{t.go}}" aria-current="page" style="min-height: 54px; border: 0; background: transparent; color: #2A2522; font-weight: 700; font-size: 14px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px"><span style="width: 24px; height: 4px; border-radius: 2px; background: #7A4E22"></span>{{t.label}}<sc-if value="{{t.hasBadge}}" hint-placeholder-val="{{ false }}"><span style="font-size: 11px; color: #8A3E0E">{{t.badge}}</span></sc-if></button></sc-if>
+<sc-if value="{{t.off}}" hint-placeholder-val="{{ true }}"><button onClick="{{t.go}}" style="min-height: 54px; border: 0; background: transparent; color: #5E5247; font-weight: 500; font-size: 14px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px"><span style="width: 24px; height: 4px; border-radius: 2px; background: transparent"></span>{{t.label}}<sc-if value="{{t.hasBadge}}" hint-placeholder-val="{{ false }}"><span style="font-size: 11px; color: #8A3E0E">{{t.badge}}</span></sc-if></button></sc-if>
+</sc-for>
+</nav>
+
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":390,"height":844}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      view: 'atelier', flash: '',
+      alertQty: '', alertSaved: false,
+      fam: 'Tous', counting: false, cnt: {},
+      q: {
+        canard: 2, can_dec: 40, cartonnette: 10, attache: 3, pochette_pl: 100, mdf: 3, carte_a4: 30,
+        sauge: 0, planch_vf: 0, buvard_bande: 6, carton_dec: 8, buvard: 15, elast: 30, carton_planche: 2,
+        kitm: 1, jeu_kit: 3, livret: 1, poch_kit: 5, lampe: 0, boitier: 4, cr2032: 10, led: 6, kraft: 20, papier_a3: 15, contre: 12,
+        scarab: 1, jeu_scarab: 16, cerclage: 0, print_a4: 25,
+        sieste: 0, sieste_imp: 4, carton_a5: 30, pochette_a5: 40, print_a3: 20,
+        t_miaou: 8, t_miaou_g: 6, cubes: 40, gomme: 2
+      },
+      edit: null, qty: '', real: '',
+      ach: { elast: 'todo', attache: 'todo', buvard: 'todo', encreur: 'todo', cubes: 'cmd', stickers: 'cmd' }, ask: null, achQty: '', over2: {},
+      targets: { sauge: [5, 2], gren: [4, 2], timbre: [3, 1], crane: [2, 1], baba: [0, 0], canard: [5, 2], kitm: [2, 1], kits: [2, 1], scarab: [2, 1], carnet: [4, 2], sieste: [2, 2] },
+      flags: { canard: true }, stepForm: false, newArt: '', extraArts: [], unknown: true, bilanOf: null,
+      links: { 0: null, 1: null },
+      set: { autoGroup: true, threshold: 14, margin: 30, marginOnce: true, workload: true, tamponCheck: true },
+      regTab: 'fam', regFam: 'Canard de poche'
+    };
+    this.state.tab = 'todo';
+    this.state.cfam = 'Canard de poche';
+    this.state.cnt = {};
+  }
+
+  renderVals() {
+    var self = this, st = this.state, Q = st.q;
+    function T(id) { var a = st.targets[id]; return a[0] + a[1]; }
+    function dur(m) { m = Math.round(m); var h = Math.floor(m / 60), r = m % 60; return h ? h + ' h' + (r ? ' ' + (r < 10 ? '0' : '') + r : '') : r + ' min'; }
+    var I = {
+      canard: { n: 'Canard de poche', fam: 'Canard de poche', k: 'vente', u: 'canards' },
+      can_dec: { n: 'Canards peints et découpés', fam: 'Canard de poche', k: 'maison', u: 'canards découpés', note: 'en boîte, prêts à monter' },
+      cartonnette: { n: 'Cartonnettes imprimées', fam: 'Canard de poche', k: 'maison', u: 'cartonnettes' },
+      attache: { n: 'Attaches de pin', fam: 'Canard de poche', k: 'achat', u: 'attaches' },
+      pochette_pl: { n: 'Pochettes plastique', fam: 'Canard de poche', k: 'achat', u: 'pochettes' },
+      carte_a4: { n: 'Feuilles de carte A4', fam: 'Canard de poche', k: 'achat', u: 'feuilles' },
+      mdf: { n: 'Plaques MDF A3', fam: 'Partagé', k: 'achat', u: 'plaques', note: 'canards, mini-presses' },
+      sauge: { n: 'Mini-presse Sauge', fam: 'Mini-presses', k: 'vente', u: 'presses' },
+      planch_vf: { n: 'Planchettes vert foncé (Sauge)', fam: 'Mini-presses', k: 'maison', u: 'planchettes' },
+      buvard_bande: { n: 'Bandes de buvard', fam: 'Mini-presses', k: 'maison', u: 'bandes' },
+      carton_dec: { n: 'Cartons découpés', fam: 'Mini-presses', k: 'maison', u: 'cartons' },
+      buvard: { n: 'Feuilles buvard Canson', fam: 'Mini-presses', k: 'achat', u: 'feuilles' },
+      elast: { n: 'Élastiques', fam: 'Mini-presses', k: 'achat', u: 'élastiques' },
+      carton_planche: { n: 'Planches de carton', fam: 'Mini-presses', k: 'recup', u: 'planches', note: 'récup, à garder de côté' },
+      kitm: { n: 'Kit Maison', fam: 'Kits', k: 'vente', u: 'kits' },
+      jeu_kit: { n: 'Jeux de 4 planchettes (Maison)', fam: 'Kits', k: 'maison', u: 'jeux' },
+      livret: { n: 'Livrets imprimés', fam: 'Kits', k: 'maison', u: 'livrets' },
+      poch_kit: { n: 'Pochettes imprimées', fam: 'Kits', k: 'maison', u: 'pochettes' },
+      lampe: { n: 'Lampes montées', fam: 'Kits', k: 'maison', u: 'lampes' },
+      boitier: { n: 'Boîtiers de pile', fam: 'Kits', k: 'achat', u: 'boîtiers' },
+      cr2032: { n: 'Piles CR2032', fam: 'Kits', k: 'achat', u: 'piles' },
+      led: { n: 'Mini LED', fam: 'Kits', k: 'achat', u: 'LED' },
+      kraft: { n: 'Papier kraft A4', fam: 'Kits', k: 'achat', u: 'feuilles' },
+      papier_a3: { n: 'Papier A3 (pochettes de kit)', fam: 'Kits', k: 'achat', u: 'feuilles' },
+      contre: { n: 'Contreplaqué A3', fam: 'Partagé', k: 'achat', u: 'plaques', note: 'kits, scarabées' },
+      scarab: { n: 'Scarabée', fam: 'Scarabée', k: 'vente', u: 'scarabées' },
+      jeu_scarab: { n: 'Jeux de planchettes scarabée', fam: 'Scarabée', k: 'maison', u: 'jeux', note: 'peints et découpés' },
+      cerclage: { n: 'Cerclages imprimés', fam: 'Scarabée', k: 'maison', u: 'cerclages' },
+      print_a4: { n: 'Papier print A4', fam: 'Scarabée', k: 'achat', u: 'feuilles' },
+      sieste: { n: 'Sieste dans les pâquerettes A5', fam: 'Prints', k: 'vente', u: 'prints' },
+      sieste_imp: { n: 'Sieste A5 imprimés, pas découpés', fam: 'Prints', k: 'maison', u: 'imprimés' },
+      carton_a5: { n: 'Cartons A5', fam: 'Prints', k: 'achat', u: 'cartons' },
+      pochette_a5: { n: 'Pochettes A5', fam: 'Prints', k: 'achat', u: 'pochettes' },
+      print_a3: { n: 'Papier print A3', fam: 'Prints', k: 'achat', u: 'feuilles' },
+      t_miaou: { n: 'Tampon Miaou', fam: 'Tampons', k: 'vente', u: 'tampons', note: 'suivi par comptage' },
+      t_miaou_g: { n: 'Gommes Miaou gravées, pas collées', fam: 'Tampons', k: 'maison', u: 'gommes' },
+      cubes: { n: 'Cubes en bois', fam: 'Tampons', k: 'achat', u: 'cubes' },
+      gomme: { n: 'Feuilles de gomme A4', fam: 'Tampons', k: 'achat', u: 'feuilles' }
+    };
+    // Étapes : ce qu'une fois « run » utilise et donne. whole = se fait par unité de matière entière.
+    var TR = {
+      can_dec: { label: 'Peindre et découper une planche de canards', verb: 'planche', in: { mdf: 1 }, out: 50, min: 40, whole: 'planche' },
+      cartonnette: { label: 'Imprimer et découper des cartonnettes', in: { carte_a4: 1 }, out: 12, min: 5, whole: 'feuille' },
+      canard: { label: 'Monter des canards', in: { can_dec: 1, attache: 1, cartonnette: 1, pochette_pl: 1 }, out: 1, min: 1 },
+      planch_vf: { label: 'Peindre en vert foncé et découper une plaque', in: { mdf: 1 }, out: 23, min: 30, whole: 'plaque' },
+      buvard_bande: { label: 'Découper des feuilles de buvard en bandes', in: { buvard: 1 }, out: 3, min: 2, whole: 'feuille' },
+      carton_dec: { label: 'Découper une planche de carton', in: { carton_planche: 1 }, out: 16, min: 10, whole: 'planche' },
+      sauge: { label: 'Monter des mini-presses Sauge', in: { planch_vf: 2, buvard_bande: 3, carton_dec: 2, elast: 2 }, out: 1, min: 3 },
+      jeu_kit: { label: 'Découper des jeux de planchettes', in: { contre: 1 }, out: 1, min: 15, whole: 'plaque' },
+      livret: { label: 'Imprimer des livrets', in: { kraft: 1 }, out: 1, min: 2, whole: 'feuille' },
+      poch_kit: { label: 'Imprimer des pochettes', in: { papier_a3: 1 }, out: 1, min: 2, whole: 'feuille' },
+      lampe: { label: 'Monter des lampes', in: { boitier: 1, cr2032: 1, led: 1 }, out: 1, min: 4 },
+      kitm: { label: 'Assembler des kits Maison', in: { jeu_kit: 1, livret: 1, poch_kit: 1, lampe: 1 }, out: 1, min: 5 },
+      jeu_scarab: { label: 'Peindre et découper une série de scarabées', in: { contre: 4 }, out: 16, min: 90, whole: 'série de 4 plaques' },
+      cerclage: { label: 'Imprimer et découper des cerclages', in: { print_a4: 1 }, out: 5, min: 4, whole: 'feuille' },
+      scarab: { label: 'Monter des scarabées', in: { jeu_scarab: 1, cerclage: 1 }, out: 1, min: 4 },
+      sieste_imp: { label: 'Imprimer des Sieste A5', in: { print_a3: 1 }, out: 4, min: 5, whole: 'feuille A3' },
+      sieste: { label: 'Découper et emballer des Sieste A5', in: { sieste_imp: 1, carton_a5: 1, pochette_a5: 1 }, out: 1, min: 2 },
+      t_miaou_g: { label: 'Graver des gommes Miaou', in: { gomme: 0.1 }, out: 1, min: 3 },
+      t_miaou: { label: 'Coller des tampons Miaou', in: { t_miaou_g: 1, cubes: 1 }, out: 1, min: 1 }
+    };
+    function fmt(n) { return Math.round(n * 10) / 10; }
+    var multi = true;
+    function tgt(id) { return T(id); }
+    function splitLabel(id) { return 'Noël ' + st.targets[id][0] + ' + Hiver ' + st.targets[id][1]; }
+    // ---------- Atelier : on remonte la chaîne seulement si la réserve ne suffit pas ----------
+    var avail = Object.assign({}, Q);
+    var totalMin = 0;
+    function planFor(item, need, steps, depth) {
+      var t = TR[item];
+      var runs = t.whole ? Math.ceil(need / t.out) : need;
+      var produced = runs * t.out;
+      var inputs = [];
+      Object.keys(t.in).forEach(function (src) {
+        var req = fmt(runs * t.in[src]);
+        var have = avail[src] || 0;
+        if (have >= req) { avail[src] = have - req; inputs.push({ ok: true, made: false, short: false, text: req + ' ' + I[src].u + ' (' + Q[src] + ' en stock)' }); }
+        else {
+          var missing = fmt(req - have);
+          avail[src] = 0;
+          if (TR[src] && depth < 4) {
+            planFor(src, missing, steps, depth + 1);
+            avail[src] = Math.max(0, (avail[src] || 0) - missing);
+            inputs.push({ ok: false, made: true, short: false, text: req + ' ' + I[src].u + ' : ' + have + ' en stock + ' + missing + ' à faire avant' });
+          } else {
+            inputs.push({ ok: false, made: false, short: true, text: req + ' ' + I[src].u + ' : il en manque ' + missing + (I[src].k === 'recup' ? ' (récup à trouver)' : ' → À acheter') });
+          }
+        }
+      });
+      totalMin += runs * t.min;
+      var e = st.edit && st.edit.tr === item ? st.edit : null;
+      var unitLabel = t.whole ? (runs > 1 ? t.whole + 's' : t.whole) : I[item].u;
+      var shortInput = null;
+      Object.keys(t.in).forEach(function (src) { if (!TR[src] && (Q[src] || 0) < runs * t.in[src] && !shortInput) shortInput = src; });
+      var step = {
+        label: t.whole ? t.label + (runs > 1 ? ' (× ' + runs + ')' : '') : t.label.replace('des ', runs + ' '),
+        gives: '→ +' + produced + ' ' + I[item].u + (produced > need ? ' (' + fmt(produced - need) + ' iront en réserve)' : ''),
+        inputs: inputs, time: dur(runs * t.min),
+        editing: !!e, closed: !e
+      };
+      if (e) {
+        var typed = parseInt(st.qty, 10) || 0;
+        var lim = shortInput;
+        Object.assign(step, {
+          askQty: e.step === 'qty', askReal: e.step === 'real',
+          qtyLabel: t.whole ? 'Combien de ' + t.whole + 's avez-vous faites ?' : 'Combien en avez-vous fait ?',
+          unitLabel: t.whole ? '(1 ' + t.whole + ' = ' + t.out + ' ' + I[item].u + ')' : I[item].u,
+          placeholder: 'conseillé : ' + runs,
+          hasWarn: !!lim && Math.max(typed, runs) * t.in[lim] > (Q[lim] || 0),
+          warn: lim ? 'Il n’y a normalement que ' + Q[lim] + ' ' + I[lim].u + ' en stock.' : '',
+          realMsg: lim ? 'Selon l’outil, il ne restait que ' + Q[lim] + ' ' + I[lim].u + '.' : '',
+          realLabel: lim ? 'Combien de ' + I[lim].u + ' aviez-vous vraiment avant de commencer ?' : '',
+          save: function () {
+            var n = parseInt(st.qty, 10) || 0; if (n <= 0) return;
+            if (lim && n * t.in[lim] > (Q[lim] || 0)) { self.setState({ edit: Object.assign({}, e, { step: 'real' }), real: '' }); return; }
+            apply(item, n, null);
+          },
+          saveReal: function () { apply(item, parseInt(st.qty, 10) || 0, { id: lim, v: parseInt(st.real, 10) || 0 }); },
+          backQty: function () { self.setState({ edit: Object.assign({}, e, { step: 'qty' }) }); },
+          cancel: function () { self.setState({ edit: null }); }
+        });
+      }
+      step.open = function () { self.setState({ edit: { tr: item, step: 'qty' }, qty: '', real: '', flash: '' }); };
+      avail[item] = (avail[item] || 0) + produced;
+      steps.push(step);
+    }
+    function apply(item, runs, fixInput) {
+      var t = TR[item], q = Object.assign({}, st.q), msg = '';
+      if (fixInput) { q[fixInput.id] = fixInput.v; msg = I[fixInput.id].n + ' recalé à ' + fixInput.v + '. '; }
+      Object.keys(t.in).forEach(function (src) { q[src] = Math.max(0, fmt((q[src] || 0) - runs * t.in[src])); });
+      q[item] = (q[item] || 0) + runs * t.out;
+      msg += '« ' + t.label + ' » : +' + (runs * t.out) + ' ' + I[item].u + '. ' + I[item].n + ' : ' + q[item] + ' en stock.';
+      self.setState({ q: q, edit: null, qty: '', real: '', flash: msg });
+    }
+
+    var goals = ['canard', 'sauge', 'kitm', 'scarab', 'sieste'];
+    var plans = [], done = [];
+    goals.forEach(function (id) {
+      var target = tgt(id), ready = Q[id], missing = Math.max(0, target - ready);
+      if (missing === 0) { done.push(I[id].n + ' (' + ready + ' / ' + target + ')'); return; }
+      var steps = [];
+      planFor(id, missing, steps, 0);
+      steps.forEach(function (s, i) { s.n = i + 1; });
+      var res = Object.keys(I).filter(function (k) { return I[k].fam === I[id].fam && I[k].k === 'maison' && Q[k] > 0; }).map(function (k) { return Q[k] + ' ' + I[k].u; });
+      plans.push({ name: I[id].n, target: target, split: splitLabel(id), ready: ready, missing: missing, steps: steps, reserve: res.length ? 'En réserve : ' + res.join(', ') : 'Rien en réserve' });
+    });
+    var prepName = 'Festival de Noël + Marché d\u2019hiver';
+
+    // ---------- Compter ----------
+    var famNames = ['Canard de poche', 'Mini-presses', 'Kits', 'Scarabée', 'Prints', 'Tampons', 'Partagé'];
+    var famFilters = famNames.map(function (n) { return { name: n === 'Partagé' ? 'Fournitures partagées' : n, sel: st.cfam === n, unsel: st.cfam !== n, pick: function () { self.setState({ cfam: n }); } }; });
+    var kindL = { vente: 'à vendre', maison: 'fait maison', achat: 'acheté', recup: 'récup' };
+    var diffs = 0;
+    Object.keys(st.cnt).forEach(function (k) { if (st.cnt[k] !== Q[k]) diffs++; });
+    var countRows = Object.keys(I).filter(function (k) { return I[k].fam === st.cfam; }).map(function (k) {
+      var n = st.cnt[k] !== undefined ? st.cnt[k] : Q[k];
+      return { name: I[k].n, kind: kindL[I[k].k], theo: Q[k], n: n, same: n === Q[k], diff: n !== Q[k],
+        inc: function () { var c = Object.assign({}, st.cnt); c[k] = n + 1; self.setState({ cnt: c }); },
+        dec: function () { var c = Object.assign({}, st.cnt); c[k] = Math.max(0, n - 1); self.setState({ cnt: c }); } };
+    });
+
+    var tabs = [['todo', 'À faire', plans.length ? plans.length + ' articles' : ''], ['count', 'Compter', ''], ['ask', 'Questions', st.alertSaved ? '' : '1']].map(function (t) {
+      return { label: t[1], badge: t[2], hasBadge: !!t[2], on: st.tab === t[0], off: st.tab !== t[0], go: function () { self.setState({ tab: t[0], edit: null, flash: '' }); } };
+    });
+    var titles = { todo: 'À faire', count: 'Compter', ask: 'Questions' };
+
+    return {
+      title: titles[st.tab], prepName: prepName, tabs: tabs,
+      isTodo: st.tab === 'todo', isCount: st.tab === 'count', isAsk: st.tab === 'ask',
+      flash: st.flash, hasFlash: !!st.flash,
+      plans: plans, hasDone: done.length > 0, doneList: done.join(', '),
+      qty: st.qty, onQty: function (e) { self.setState({ qty: e.target.value }); },
+      real: st.real, onReal: function (e) { self.setState({ real: e.target.value }); },
+      famFilters: famFilters, countRows: countRows, countDiffs: diffs,
+      saveCount: function () { var q = Object.assign({}, st.q); Object.keys(st.cnt).forEach(function (k) { q[k] = st.cnt[k]; }); self.setState({ q: q, cnt: {}, flash: 'Comptage enregistré : ' + diffs + ' écart(s) corrigé(s).' }); },
+      showAlert: !st.alertSaved, noAlert: st.alertSaved, alertQty: st.alertQty,
+      onAlertQty: function (e) { self.setState({ alertQty: e.target.value }); },
+      validateAlert: function () { if (st.alertQty !== '') self.setState({ alertSaved: true, flash: 'Noté : ' + st.alertQty + ' Sieste A5.' }); }
+    };
+  }
+}
+</script>
+</body>
+</html>

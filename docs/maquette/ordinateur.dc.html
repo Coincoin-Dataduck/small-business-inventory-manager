@@ -1,0 +1,859 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Stock Hervine — ordinateur</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Courier+Prime:wght@400;700&amp;family=Inter:wght@400;500;600;700&amp;display=swap" rel="stylesheet">
+<style>
+body{margin:0}
+a{color:#7A4E22}a:hover{color:#5C3A18}
+button,input{font-family:inherit}
+.tbl{width:100%;border-collapse:collapse;font-size:14px}
+.tbl th{text-align:left;font-size:12px;font-weight:600;color:#6B5D4F;text-transform:uppercase;letter-spacing:.05em;padding:10px 12px;border-bottom:1px solid #E2D6C3;background:#FBF8F2}
+.tbl td{padding:10px 12px;border-bottom:1px solid #F0E8DA;vertical-align:middle}
+.tbl tr:last-child td{border-bottom:0}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+</style>
+</helmet>
+<div style="width: 100%; height: 100vh; display: flex; background: #F6F1E8; color: #2A2522; font-family: Inter, system-ui, sans-serif; font-size: 15px; overflow: hidden">
+
+<!-- ============ MENU LATÉRAL ============ -->
+<nav aria-label="Menu" style="flex: 0 0 236px; display: flex; flex-direction: column; gap: 4px; padding: 22px 14px; border-right: 1px solid #E2D6C3; background: #FFFDF9; box-sizing: border-box">
+<div style="font-family: 'Courier Prime', monospace; font-size: 21px; font-weight: 700; padding: 0 12px 20px">Atelier d'Hervine</div>
+<sc-for list="{{nav}}" as="n" hint-placeholder-count="5">
+<sc-if value="{{n.on}}" hint-placeholder-val="{{ false }}"><button onClick="{{n.go}}" aria-current="page" style="min-height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: #EFE4D2; color: #2A2522; font-weight: 700; font-size: 15px; text-align: left; cursor: pointer; display: flex; align-items: center; justify-content: space-between">{{n.label}}<sc-if value="{{n.hasBadge}}" hint-placeholder-val="{{ false }}"><span style="font-size: 12px; font-weight: 600; color: #8A3E0E">{{n.badge}}</span></sc-if></button></sc-if>
+<sc-if value="{{n.off}}" hint-placeholder-val="{{ true }}"><button onClick="{{n.go}}" style="min-height: 44px; padding: 0 12px; border: 0; border-radius: 10px; background: transparent; color: #4A4038; font-weight: 500; font-size: 15px; text-align: left; cursor: pointer; display: flex; align-items: center; justify-content: space-between">{{n.label}}<sc-if value="{{n.hasBadge}}" hint-placeholder-val="{{ false }}"><span style="font-size: 12px; font-weight: 600; color: #8A3E0E">{{n.badge}}</span></sc-if></button></sc-if>
+</sc-for>
+<div style="flex: 1 1 auto"></div>
+<div style="background: #2A2522; color: #FFFFFF; border-radius: 12px; padding: 12px; display: flex; flex-direction: column; gap: 4px">
+<span style="font-size: 11px; letter-spacing: .08em; text-transform: uppercase; color: #E9DFCF">On prépare</span>
+<strong style="font-size: 14px; line-height: 1.35">{{prepName}}</strong>
+<span style="font-size: 13px; color: #E9DFCF">prêt avant le 12/12 · J-26</span>
+</div>
+</nav>
+
+<!-- ============ CONTENU ============ -->
+<main style="flex: 1 1 auto; min-width: 0; overflow-y: auto">
+<div style="max-width: 1180px; margin: 0 auto; padding: 26px 36px 56px; display: flex; flex-direction: column; gap: 20px; box-sizing: border-box">
+
+<header style="display: flex; align-items: center; gap: 16px; flex-wrap: wrap">
+<sc-if value="{{hasBack}}" hint-placeholder-val="{{ false }}"><button onClick="{{back}}" style="min-height: 40px; padding: 0 12px; border: 1px solid #B9A88F; border-radius: 10px; background: #FFFDF9; color: #2A2522; cursor: pointer">← Retour</button></sc-if>
+<h1 style="margin: 0; flex: 1 1 auto; font-family: 'Courier Prime', monospace; font-size: 30px">{{title}}</h1>
+<sc-if value="{{hasMainAction}}" hint-placeholder-val="{{ true }}"><button onClick="{{mainAction}}" style="min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 700; cursor: pointer">{{mainActionLabel}}</button></sc-if>
+</header>
+
+<sc-if value="{{hasFlash}}" hint-placeholder-val="{{ false }}"><div style="background: #EAF3EC; border: 1px solid #9CC2A8; border-radius: 12px; padding: 12px 16px; color: #1F5135; font-size: 14px">{{flash}}</div></sc-if>
+
+<!-- ================= STOCK ================= -->
+<sc-if value="{{isStock}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 18px">
+
+<sc-if value="{{showAlert}}" hint-placeholder-val="{{ true }}">
+<section style="background: #FFF4E8; border: 1.5px solid #C2611F; border-radius: 14px; padding: 14px 18px; display: flex; align-items: center; gap: 18px; flex-wrap: wrap">
+<div style="flex: 1 1 380px; display: flex; flex-direction: column; gap: 4px">
+<strong style="color: #8A3E0E; font-size: 14px">Une question avant de continuer (1 sur 8)</strong>
+<span style="line-height: 1.4">SumUp a vendu <strong>2 Sieste dans les pâquerettes A5</strong> alors qu'il n'en restait plus. Combien en aviez-vous vraiment ?</span>
+</div>
+<label for="al-q" style="position: absolute; left: -9999px">Nombre réel</label>
+<input id="al-q" type="number" min="0" value="{{alertQty}}" onChange="{{onAlertQty}}" placeholder="ex. 4" style="width: 110px; min-height: 44px; border: 1px solid #B9A88F; border-radius: 10px; padding: 0 12px; font-size: 16px; background: #FFFFFF; color: #2A2522">
+<button onClick="{{validateAlert}}" style="min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 600; cursor: pointer">Valider</button>
+</section>
+</sc-if>
+
+<div style="display: flex; gap: 8px; flex-wrap: wrap; align-items: center">
+<sc-for list="{{famFilters}}" as="ff" hint-placeholder-count="6">
+<sc-if value="{{ff.sel}}" hint-placeholder-val="{{ false }}"><button onClick="{{ff.pick}}" style="min-height: 36px; padding: 0 12px; border: 0; border-radius: 999px; background: #2A2522; color: #FFFFFF; font-weight: 600; cursor: pointer">{{ff.name}}</button></sc-if>
+<sc-if value="{{ff.unsel}}" hint-placeholder-val="{{ true }}"><button onClick="{{ff.pick}}" style="min-height: 36px; padding: 0 12px; border: 1px solid #B9A88F; border-radius: 999px; background: #FFFDF9; color: #2A2522; cursor: pointer">{{ff.name}}</button></sc-if>
+</sc-for>
+<sc-if value="{{counting}}" hint-placeholder-val="{{ false }}"><span style="margin-left: auto; font-size: 14px; color: #8A3E0E; font-weight: 600">Comptage : tapez ce que vous voyez, laissez vide ce que vous ne comptez pas</span></sc-if>
+</div>
+
+<div style="display: flex; gap: 18px; font-size: 13px; color: #4A4038; flex-wrap: wrap">
+<span><span style="display: inline-block; padding: 2px 8px; border-radius: 999px; background: #2A2522; color: #FFFFFF; font-weight: 600">À vendre</span> prêt pour le stand</span>
+<span><span style="display: inline-block; padding: 2px 8px; border-radius: 999px; background: #EFE4D2; color: #2A2522; font-weight: 600">Fait maison</span> préparé d'avance, en réserve</span>
+<span><span style="display: inline-block; padding: 2px 8px; border-radius: 999px; border: 1px solid #B9A88F; color: #2A2522; font-weight: 600">Acheté</span> fourniture</span>
+</div>
+
+<sc-for list="{{stockGroups}}" as="g" hint-placeholder-count="3">
+<section style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 14px; overflow: hidden">
+<div style="padding: 12px 14px 4px; font-weight: 700; font-size: 16px">{{g.name}}</div>
+<table class="tbl">
+<tbody>
+<sc-for list="{{g.rows}}" as="r" hint-placeholder-count="5">
+<tr>
+<td style="width: 130px">
+<sc-if value="{{r.isVente}}" hint-placeholder-val="{{ true }}"><span style="font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #2A2522; color: #FFFFFF; font-weight: 600">À vendre</span></sc-if>
+<sc-if value="{{r.isMaison}}" hint-placeholder-val="{{ false }}"><span style="font-size: 12px; padding: 2px 8px; border-radius: 999px; background: #EFE4D2; color: #2A2522; font-weight: 600">Fait maison</span></sc-if>
+<sc-if value="{{r.isAchat}}" hint-placeholder-val="{{ false }}"><span style="font-size: 12px; padding: 2px 8px; border-radius: 999px; border: 1px solid #B9A88F; color: #2A2522; font-weight: 600">{{r.kindLabel}}</span></sc-if>
+</td>
+<td style="font-weight: 600">{{r.name}}</td>
+<td class="num" style="font-weight: 700; font-size: 16px; width: 90px">{{r.qty}}</td>
+<td style="color: #6B5D4F; width: 220px">{{r.note}}</td>
+<td style="width: 200px">
+<sc-if value="{{r.countMode}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; align-items: center; gap: 8px; justify-content: flex-end">
+<label for="{{r.inputId}}" style="position: absolute; left: -9999px">Compté pour {{r.name}}</label>
+<input id="{{r.inputId}}" type="number" min="0" value="{{r.counted}}" onChange="{{r.onCount}}" placeholder="{{r.qty}}" style="width: 76px; min-height: 36px; border: 1px solid #B9A88F; border-radius: 8px; padding: 0 8px; font-size: 15px; background: #FFFFFF; color: #2A2522">
+<sc-if value="{{r.hasDiff}}" hint-placeholder-val="{{ false }}"><span style="font-size: 13px; font-weight: 700; color: #8A3E0E; min-width: 34px">{{r.diff}}</span></sc-if>
+</div>
+</sc-if>
+<sc-if value="{{r.normalMode}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; justify-content: flex-end"><button onClick="{{r.fix}}" style="min-height: 34px; padding: 0 10px; border: 1px solid #B9A88F; border-radius: 8px; background: transparent; color: #2A2522; font-size: 13px; cursor: pointer">Compter</button></div>
+</sc-if>
+</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</section>
+</sc-for>
+
+<sc-if value="{{counting}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; align-items: center; gap: 14px; justify-content: flex-end">
+<span style="font-size: 14px">{{countDiffs}} écart(s) avec le chiffre de l'outil</span>
+<button onClick="{{cancelCount}}" style="min-height: 44px; padding: 0 16px; border: 1px solid #B9A88F; border-radius: 10px; background: transparent; color: #2A2522; cursor: pointer">Annuler</button>
+<button onClick="{{saveCount}}" style="min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 700; cursor: pointer">Enregistrer le comptage</button>
+</div>
+</sc-if>
+</div>
+</sc-if>
+
+<!-- ================= ATELIER ================= -->
+<sc-if value="{{isAtelier}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 18px">
+
+<section style="background: #2A2522; color: #FFFFFF; border-radius: 14px; padding: 16px 20px; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 20px">
+<div style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: #E9DFCF">On prépare</span><strong style="font-size: 17px">{{prepName}}</strong><span style="font-size: 13px; color: #E9DFCF">{{prepDates}}</span></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: #E9DFCF">Tout prêt avant</span><strong style="font-size: 17px">le 12/12 · dans 26 jours</strong><span style="font-size: 13px; color: #E9DFCF">{{prepWhy}}</span></div>
+<div style="display: flex; flex-direction: column; gap: 4px"><span style="font-size: 12px; letter-spacing: .06em; text-transform: uppercase; color: #E9DFCF">Travail restant</span><strong style="font-size: 17px">≈ {{workLabel}} sur ≈ 29 h dispo</strong><span style="font-size: 13px; color: #E9DFCF">en ne comptant que ce qu'il reste à faire</span></div>
+</section>
+
+<p style="margin: 0; font-size: 14px; color: #4A4038; line-height: 1.45; max-width: 860px">Pour chaque article, l'outil part de ce qui est déjà fait maison et ne propose de refaire une étape que si la réserve ne suffit pas. Les étapes sont dans l'ordre où les faire.</p>
+
+<sc-for list="{{plans}}" as="pl" hint-placeholder-count="3">
+<section style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 14px; overflow: hidden">
+<div style="display: flex; align-items: baseline; gap: 16px; flex-wrap: wrap; padding: 14px 18px; border-bottom: 1px solid #F0E8DA; background: #FBF8F2">
+<strong style="font-size: 17px">{{pl.name}}</strong>
+<span style="font-size: 14px; color: #4A4038">objectif {{pl.target}} ({{pl.split}}) · {{pl.ready}} prêts</span>
+<span style="font-size: 14px; font-weight: 700; color: #8A3E0E">il en manque {{pl.missing}}</span>
+<span style="flex: 1 1 auto"></span>
+<span style="font-size: 13px; color: #4A4038">{{pl.reserve}}</span>
+</div>
+<sc-for list="{{pl.steps}}" as="sp" hint-placeholder-count="2">
+<div style="display: flex; flex-direction: column; gap: 10px; padding: 12px 18px; border-bottom: 1px solid #F0E8DA">
+<div style="display: grid; grid-template-columns: 34px minmax(260px, 1.4fr) minmax(280px, 1.6fr) 90px 150px; gap: 16px; align-items: center">
+<span style="width: 28px; height: 28px; border-radius: 999px; background: #EFE4D2; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 14px">{{sp.n}}</span>
+<div style="display: flex; flex-direction: column; gap: 2px"><strong>{{sp.label}}</strong><span style="font-size: 13px; color: #4A4038">{{sp.gives}}</span></div>
+<div style="display: flex; flex-direction: column; gap: 3px">
+<sc-for list="{{sp.inputs}}" as="ip" hint-placeholder-count="3">
+<sc-if value="{{ip.ok}}" hint-placeholder-val="{{ true }}"><span style="font-size: 13px; color: #2A2522">✓ {{ip.text}}</span></sc-if>
+<sc-if value="{{ip.made}}" hint-placeholder-val="{{ false }}"><span style="font-size: 13px; color: #3F5F7A">↑ {{ip.text}}</span></sc-if>
+<sc-if value="{{ip.short}}" hint-placeholder-val="{{ false }}"><span style="font-size: 13px; color: #8A3E0E; font-weight: 600">⚠ {{ip.text}}</span></sc-if>
+</sc-for>
+</div>
+<span class="num" style="font-size: 13px; color: #4A4038">{{sp.time}}</span>
+<div style="display: flex; justify-content: flex-end">
+<sc-if value="{{sp.closed}}" hint-placeholder-val="{{ true }}"><button onClick="{{sp.open}}" style="min-height: 40px; padding: 0 14px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 700; cursor: pointer">C'est fait…</button></sc-if>
+</div>
+</div>
+<sc-if value="{{sp.editing}}" hint-placeholder-val="{{ false }}">
+<div style="margin-left: 50px; display: flex; flex-direction: column; gap: 8px; background: #F6F1E8; border-radius: 10px; padding: 12px 14px">
+<sc-if value="{{sp.askQty}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<label for="sp-qty" style="font-weight: 700">{{sp.qtyLabel}}</label>
+<div style="display: flex; gap: 8px; align-items: center">
+<input id="sp-qty" type="number" min="1" value="{{qty}}" onChange="{{onQty}}" placeholder="{{sp.placeholder}}" style="width: 140px; min-height: 44px; border: 1px solid #B9A88F; border-radius: 10px; padding: 0 12px; font-size: 16px; background: #FFFFFF; color: #2A2522">
+<span style="font-size: 14px; color: #4A4038">{{sp.unitLabel}}</span>
+<button onClick="{{sp.save}}" style="min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 700; cursor: pointer">Enregistrer</button>
+<button onClick="{{sp.cancel}}" style="min-height: 44px; padding: 0 10px; border: 0; background: transparent; color: #4A4038; text-decoration: underline; cursor: pointer">Annuler</button>
+</div>
+<sc-if value="{{sp.hasWarn}}" hint-placeholder-val="{{ false }}"><div style="font-size: 14px; color: #8A3E0E; font-weight: 600">⚠ {{sp.warn}}</div></sc-if>
+</div>
+</sc-if>
+<sc-if value="{{sp.askReal}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<div style="font-weight: 700; color: #8A3E0E">{{sp.realMsg}}</div>
+<label for="sp-real" style="font-size: 14px">{{sp.realLabel}}</label>
+<div style="display: flex; gap: 8px; align-items: center">
+<input id="sp-real" type="number" min="0" value="{{real}}" onChange="{{onReal}}" style="width: 140px; min-height: 44px; border: 1px solid #B9A88F; border-radius: 10px; padding: 0 12px; font-size: 16px; background: #FFFFFF; color: #2A2522">
+<button onClick="{{sp.saveReal}}" style="min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 700; cursor: pointer">Valider</button>
+<button onClick="{{sp.backQty}}" style="min-height: 44px; padding: 0 10px; border: 0; background: transparent; color: #4A4038; text-decoration: underline; cursor: pointer">Je me suis trompé de nombre</button>
+</div>
+</div>
+</sc-if>
+</div>
+</sc-if>
+</div>
+</sc-for>
+</section>
+</sc-for>
+
+<sc-if value="{{hasDone}}" hint-placeholder-val="{{ true }}"><div style="font-size: 14px; color: #1F5135"><strong>Déjà prêt :</strong> {{doneList}}</div></sc-if>
+</div>
+</sc-if>
+
+<!-- ================= À ACHETER ================= -->
+<sc-if value="{{isAchats}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 18px">
+<h2 style="margin: 0; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: #6B5D4F">À valider</h2>
+<section style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 14px; overflow: hidden">
+<table class="tbl">
+<thead><tr><th>Pièce</th><th>Pourquoi</th><th class="num">À commander</th><th>Avant le</th><th style="width: 300px"></th></tr></thead>
+<tbody>
+<sc-for list="{{achTodo}}" as="a" hint-placeholder-count="4">
+<tr>
+<td style="font-weight: 600">{{a.name}}<div style="font-weight: 400; font-size: 12px; color: #6B5D4F">{{a.where}}</div></td>
+<td style="color: #4A4038; line-height: 1.4; max-width: 360px">{{a.why}}</td>
+<td class="num" style="font-weight: 700; color: #7A4E22">{{a.order}}</td>
+<td style="color: #8A3E0E; font-weight: 600">{{a.deadline}}</td>
+<td>
+<sc-if value="{{a.idle}}" hint-placeholder-val="{{ true }}"><div style="display: flex; gap: 6px; justify-content: flex-end">
+<button onClick="{{a.ok}}" style="min-height: 36px; padding: 0 12px; border: 0; border-radius: 8px; background: #2A2522; color: #FFFFFF; font-weight: 600; cursor: pointer">Commandé</button>
+<button onClick="{{a.have}}" style="min-height: 36px; padding: 0 10px; border: 1px solid #B9A88F; border-radius: 8px; background: transparent; color: #2A2522; cursor: pointer">J'en ai déjà</button>
+<button onClick="{{a.edit}}" style="min-height: 36px; padding: 0 10px; border: 1px solid #B9A88F; border-radius: 8px; background: transparent; color: #2A2522; cursor: pointer">Modifier</button>
+</div></sc-if>
+<sc-if value="{{a.asking}}" hint-placeholder-val="{{ false }}"><div style="display: flex; gap: 6px; justify-content: flex-end; align-items: center">
+<label for="ach-q" style="font-size: 13px">{{a.askLabel}}</label>
+<input id="ach-q" type="number" min="0" value="{{achQty}}" onChange="{{onAchQty}}" style="width: 70px; min-height: 36px; border: 1px solid #B9A88F; border-radius: 8px; padding: 0 8px; background: #FFFFFF; color: #2A2522">
+<button onClick="{{a.confirm}}" style="min-height: 36px; padding: 0 12px; border: 0; border-radius: 8px; background: #2A2522; color: #FFFFFF; font-weight: 600; cursor: pointer">OK</button>
+</div></sc-if>
+</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</section>
+<h2 style="margin: 0; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: #6B5D4F">Commandé, pas encore reçu</h2>
+<section style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 14px; overflow: hidden">
+<table class="tbl">
+<tbody>
+<sc-for list="{{achCmd}}" as="c" hint-placeholder-count="2">
+<tr><td style="font-weight: 600">{{c.name}}</td><td style="color: #4A4038">{{c.order}}</td><td style="text-align: right"><button onClick="{{c.recv}}" style="min-height: 36px; padding: 0 12px; border: 1px solid #2A2522; border-radius: 8px; background: transparent; color: #2A2522; font-weight: 600; cursor: pointer">Reçu</button></td></tr>
+</sc-for>
+</tbody>
+</table>
+</section>
+</div>
+</sc-if>
+
+<!-- ================= SALONS ================= -->
+<sc-if value="{{isSalons}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 6px">
+<p style="margin: 0 0 12px; font-size: 14px; color: #4A4038; line-height: 1.45; max-width: 760px">Les salons trop rapprochés pour refaire du stock entre eux sont regroupés : on les prépare ensemble. L'outil propose un regroupement ({{thresholdLabel}}), vous pouvez séparer ou regrouper à la main.</p>
+<sc-for list="{{timeline}}" as="tl" hint-placeholder-count="5">
+<sc-if value="{{tl.isSalon}}" hint-placeholder-val="{{ true }}">
+<section style="background: #FFFDF9; border: 1px solid #E2D6C3; border-left: 5px solid {{tl.color}}; border-radius: 14px; padding: 14px 18px; display: grid; grid-template-columns: minmax(220px, 1.2fr) minmax(220px, 1fr) minmax(260px, 1.3fr); gap: 18px; align-items: center">
+<div style="display: flex; flex-direction: column; gap: 2px"><strong style="font-size: 17px">{{tl.name}}</strong><span style="font-size: 14px; color: #4A4038">{{tl.dates}} · {{tl.days}}</span></div>
+<div style="font-size: 14px; color: #4A4038">{{tl.type}} · {{tl.visitors}}</div>
+<div style="font-size: 14px; font-weight: 600">{{tl.group}}</div>
+</section>
+</sc-if>
+<sc-if value="{{tl.isGap}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; align-items: center; gap: 14px; padding: 4px 0 4px 28px">
+<span style="width: 2px; height: 34px; background: #B9A88F"></span>
+<span style="font-size: 14px; color: #4A4038">{{tl.gapLabel}}</span>
+<sc-if value="{{tl.grouped}}" hint-placeholder-val="{{ true }}"><span style="font-size: 13px; font-weight: 600; padding: 3px 9px; border-radius: 999px; background: #EFE4D2">Préparés ensemble</span></sc-if>
+<sc-if value="{{tl.separate}}" hint-placeholder-val="{{ false }}"><span style="font-size: 13px; font-weight: 600; padding: 3px 9px; border-radius: 999px; border: 1px solid #B9A88F">Préparés séparément</span></sc-if>
+<sc-if value="{{tl.manual}}" hint-placeholder-val="{{ false }}"><span style="font-size: 12px; color: #6B5D4F">(votre choix)</span></sc-if>
+<button onClick="{{tl.toggle}}" style="min-height: 34px; padding: 0 12px; border: 1px solid #2A2522; border-radius: 8px; background: transparent; color: #2A2522; font-weight: 600; font-size: 13px; cursor: pointer">{{tl.toggleLabel}}</button>
+<sc-if value="{{tl.manual}}" hint-placeholder-val="{{ false }}"><button onClick="{{tl.reset}}" style="min-height: 34px; padding: 0 8px; border: 0; background: transparent; color: #4A4038; text-decoration: underline; font-size: 13px; cursor: pointer">Revenir à la proposition</button></sc-if>
+</div>
+</sc-if>
+</sc-for>
+
+<section style="margin-top: 18px; background: #FFFDF9; border: 1.5px solid #2A2522; border-radius: 14px; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px">
+<div style="display: flex; justify-content: space-between; align-items: baseline; gap: 12px; flex-wrap: wrap"><strong style="font-size: 17px">Préparation en cours : {{prepName}}</strong><span style="font-size: 14px; color: #4A4038">{{prepDates}}</span></div>
+<div style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px">
+<sc-for list="{{phases}}" as="ph" hint-placeholder-count="4">
+<sc-if value="{{ph.current}}" hint-placeholder-val="{{ false }}"><div style="border-radius: 10px; border: 2px solid #C2611F; padding: 10px; display: flex; flex-direction: column; gap: 2px"><strong style="font-size: 14px">{{ph.label}}</strong><span style="font-size: 12px; color: #4A4038">{{ph.when}}</span></div></sc-if>
+<sc-if value="{{ph.done}}" hint-placeholder-val="{{ false }}"><div style="border-radius: 10px; background: #2A2522; color: #FFFFFF; padding: 10px; display: flex; flex-direction: column; gap: 2px"><strong style="font-size: 14px">✓ {{ph.label}}</strong><span style="font-size: 12px; color: #E9DFCF">{{ph.when}}</span></div></sc-if>
+<sc-if value="{{ph.todo}}" hint-placeholder-val="{{ true }}"><div style="border-radius: 10px; border: 1px solid #E2D6C3; padding: 10px; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 14px">{{ph.label}}</span><span style="font-size: 12px; color: #6B5D4F">{{ph.when}}</span></div></sc-if>
+</sc-for>
+</div>
+<button onClick="{{goObjectifs}}" style="align-self: flex-start; min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 700; cursor: pointer">Fixer les objectifs</button>
+</section>
+
+<h2 style="margin: 22px 0 6px; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: #6B5D4F">Salons passés</h2>
+<section style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 14px; overflow: hidden">
+<table class="tbl">
+<thead><tr><th>Salon</th><th>Type</th><th class="num">Jours</th><th class="num">Fréquentation</th><th class="num">Ventes carte</th><th class="num">Tampons</th><th class="num">Tampons / 1 000 vis.</th><th></th></tr></thead>
+<tbody>
+<sc-for list="{{pastSalons}}" as="ps" hint-placeholder-count="5">
+<tr><td style="font-weight: 600">{{ps.name}}<div style="font-weight: 400; font-size: 12px; color: #6B5D4F">{{ps.when}}</div></td><td>{{ps.type}}</td><td class="num">{{ps.days}}</td><td class="num">{{ps.vis}}</td><td class="num">{{ps.ca}}</td><td class="num">{{ps.tamp}}</td><td class="num" style="font-weight: 700">{{ps.per}}</td><td style="text-align: right"><button onClick="{{ps.open}}" style="min-height: 32px; padding: 0 10px; border: 1px solid #B9A88F; border-radius: 8px; background: transparent; color: #2A2522; font-size: 13px; cursor: pointer">Bilan</button></td></tr>
+</sc-for>
+</tbody>
+</table>
+</section>
+</div>
+</sc-if>
+
+<!-- ================= OBJECTIFS ================= -->
+<sc-if value="{{isObjectifs}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 16px">
+
+<section style="background: #FFFDF9; border: 1.5px solid #2A2522; border-radius: 14px; padding: 16px 20px; display: flex; flex-direction: column; gap: 12px">
+<strong style="font-size: 16px">1. Combien de tampons pour chaque salon ?</strong>
+<p style="margin: 0; font-size: 14px; color: #4A4038; line-height: 1.45">Les tampons servent de thermomètre : leur présentoir est impossible à manquer, donc leurs ventes reflètent le passage réel devant le stand. On les prévoit à partir de salons comparables.</p>
+<table class="tbl" style="background: #FBF8F2; border-radius: 10px">
+<thead><tr><th>Salon</th><th>Comparé à</th><th>Calcul</th><th class="num">Tampons prévus</th></tr></thead>
+<tbody>
+<sc-for list="{{thermo}}" as="th" hint-placeholder-count="2">
+<tr><td style="font-weight: 600">{{th.name}}</td><td>{{th.ref}}</td><td style="color: #4A4038">{{th.calc}}</td><td class="num" style="font-weight: 700; font-size: 16px">{{th.n}}</td></tr>
+</sc-for>
+</tbody>
+</table>
+</section>
+
+<section style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 14px; padding: 16px 20px; display: flex; flex-direction: column; gap: 10px">
+<strong style="font-size: 16px">2. Les autres articles, à partir des tampons</strong>
+<p style="margin: 0; font-size: 14px; color: #4A4038; line-height: 1.45">Pour chaque famille : ventes pour 100 tampons au <strong>meilleur</strong> salon passé (ce que l'article vend quand il est bien exposé), réparties entre modèles selon leurs ventes passées, + {{marginPct}} % de marge. Les salons où un article était mal exposé ou épuisé sont écartés.</p>
+<table class="tbl">
+<thead><tr><th>Article</th><th>Pour 100 tampons</th><th>Festival de Noël</th><th>Marché d'hiver</th><th class="num">À avoir le 12/12</th></tr></thead>
+<tbody>
+<sc-for list="{{objRows}}" as="o" hint-placeholder-count="8">
+<tr>
+<td style="font-weight: 600">{{o.name}}<div style="font-weight: 400; font-size: 12px; color: #6B5D4F">{{o.share}}</div></td>
+<td style="font-size: 13px; color: #4A4038">{{o.ratio}}</td>
+<sc-for list="{{o.per}}" as="ps" hint-placeholder-count="2">
+<td><div style="display: flex; align-items: center; gap: 6px">
+<button onClick="{{ps.dec}}" aria-label="Moins" style="width: 32px; height: 32px; border: 1px solid #B9A88F; border-radius: 8px; background: #FFFFFF; color: #2A2522; cursor: pointer">−</button>
+<strong style="min-width: 26px; text-align: center; font-variant-numeric: tabular-nums">{{ps.n}}</strong>
+<button onClick="{{ps.inc}}" aria-label="Plus" style="width: 32px; height: 32px; border: 1px solid #B9A88F; border-radius: 8px; background: #FFFFFF; color: #2A2522; cursor: pointer">+</button>
+<span style="font-size: 12px; color: #6B5D4F">conseillé {{ps.reco}}</span>
+</div></td>
+</sc-for>
+<td class="num" style="font-weight: 700">{{o.total}}</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+<div style="font-size: 13px; color: #6B5D4F; line-height: 1.45">Confiance faible : deux gros salons et deux petits en historique. Prints : ventes trop différentes d'un salon à l'autre (19 contre 2 pour 100 tampons), objectif à fixer à la main. Baba Yaga : presque jamais vendue, conseillé 0.</div>
+</section>
+<button onClick="{{saveObj}}" style="align-self: flex-end; min-height: 44px; padding: 0 20px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 700; cursor: pointer">Valider les objectifs</button>
+</div>
+</sc-if>
+
+<!-- ================= BILAN ================= -->
+<sc-if value="{{isBilan}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 16px">
+<section style="display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px">
+<div style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #6B5D4F; text-transform: uppercase; letter-spacing: .05em">Ventes carte</span><strong style="font-size: 22px">772 €</strong><span style="font-size: 13px; color: #4A4038">481 € samedi · 291 € dimanche</span></div>
+<div style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #6B5D4F; text-transform: uppercase; letter-spacing: .05em">Espèces</span><div style="display: flex; gap: 6px; align-items: center"><label for="cash" style="position: absolute; left: -9999px">Espèces</label><input id="cash" type="number" min="0" placeholder="?" style="width: 90px; min-height: 36px; border: 1px solid #B9A88F; border-radius: 8px; padding: 0 8px; background: #FFFFFF; color: #2A2522; font-size: 16px"><span>€</span></div><span style="font-size: 13px; color: #4A4038">absent de SumUp, à noter</span></div>
+<div style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #6B5D4F; text-transform: uppercase; letter-spacing: .05em">Tampons (thermomètre)</span><strong style="font-size: 22px">101</strong><span style="font-size: 13px; color: #4A4038">5 pour 1 000 visiteurs</span></div>
+<div style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 12px; padding: 12px 14px; display: flex; flex-direction: column; gap: 2px"><span style="font-size: 12px; color: #6B5D4F; text-transform: uppercase; letter-spacing: .05em">Fréquentation</span><strong style="font-size: 22px">~20 000</strong><span style="font-size: 13px; color: #4A4038">convention · 2 jours</span></div>
+</section>
+
+<section style="background: #FFF4E8; border: 1px solid #C2611F; border-radius: 14px; padding: 14px 18px; display: flex; flex-direction: column; gap: 6px">
+<strong style="color: #8A3E0E">Tampons : vérification</strong>
+<span style="font-size: 14px; line-height: 1.45">SumUp : 37 à l'unité + 4 × 16 lots = <strong>101</strong> (+ ceux des gachapons) · comptage avant − comptage au retour = <strong>108</strong> (exemple). Écart de 7 : ventes en espèces, gachapons, ou erreur de comptage. Si vous avez noté les espèces, l'écart devrait s'en approcher.</span>
+</section>
+
+<section style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 14px; overflow: hidden">
+<table class="tbl">
+<thead><tr><th>Article</th><th class="num">Vendus</th><th class="num">Pour 100 tampons</th><th>Mal exposé ou épuisé ?</th></tr></thead>
+<tbody>
+<sc-for list="{{bilanRows}}" as="b" hint-placeholder-count="8">
+<tr>
+<td style="font-weight: 600">{{b.name}}</td>
+<td class="num">{{b.sold}}</td>
+<td class="num">{{b.ratio}}</td>
+<td>
+<sc-if value="{{b.flag}}" hint-placeholder-val="{{ false }}"><button onClick="{{b.toggle}}" aria-pressed="true" style="min-height: 34px; padding: 0 12px; border: 0; border-radius: 8px; background: #8A3E0E; color: #FFFFFF; font-size: 13px; font-weight: 600; cursor: pointer">Oui · ne compte pas</button></sc-if>
+<sc-if value="{{b.noFlag}}" hint-placeholder-val="{{ true }}"><button onClick="{{b.toggle}}" aria-pressed="false" style="min-height: 34px; padding: 0 12px; border: 1px solid #B9A88F; border-radius: 8px; background: transparent; color: #2A2522; font-size: 13px; cursor: pointer">Non</button></sc-if>
+</td>
+</tr>
+</sc-for>
+</tbody>
+</table>
+</section>
+<p style="margin: 0; font-size: 13px; color: #6B5D4F">Les articles marqués « ne compte pas » sont écartés des recommandations des prochains salons. Le canard est marqué pour l'exemple : mal mis en avant au début du salon.</p>
+</div>
+</sc-if>
+
+<!-- ================= RÉGLAGES ================= -->
+<sc-if value="{{isReglages}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 18px">
+<div role="tablist" style="display: flex; gap: 6px; border-bottom: 1px solid #E2D6C3">
+<sc-for list="{{regTabs}}" as="rt" hint-placeholder-count="3">
+<sc-if value="{{rt.on}}" hint-placeholder-val="{{ false }}"><button role="tab" aria-selected="true" onClick="{{rt.go}}" style="min-height: 44px; padding: 0 16px; border: 0; border-bottom: 3px solid #2A2522; background: transparent; color: #2A2522; font-weight: 700; cursor: pointer">{{rt.label}}</button></sc-if>
+<sc-if value="{{rt.off}}" hint-placeholder-val="{{ true }}"><button role="tab" aria-selected="false" onClick="{{rt.go}}" style="min-height: 44px; padding: 0 16px; border: 0; border-bottom: 3px solid transparent; background: transparent; color: #4A4038; cursor: pointer">{{rt.label}}</button></sc-if>
+</sc-for>
+</div>
+
+<sc-if value="{{isRegFonct}}" hint-placeholder-val="{{ true }}">
+<div style="display: flex; flex-direction: column; gap: 10px; max-width: 820px">
+<p style="margin: 0 0 6px; font-size: 14px; color: #4A4038; line-height: 1.45">L'outil fait des choix par défaut pour vous guider. Chacun peut être désactivé ici.</p>
+<sc-for list="{{settings}}" as="sg" hint-placeholder-count="6">
+<div style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 12px; padding: 12px 16px; display: flex; align-items: center; gap: 16px">
+<div style="flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px"><strong style="font-size: 15px">{{sg.label}}</strong><span style="font-size: 13px; color: #4A4038; line-height: 1.4">{{sg.help}}</span></div>
+<sc-if value="{{sg.hasNum}}" hint-placeholder-val="{{ false }}"><div style="display: flex; align-items: center; gap: 6px"><button onClick="{{sg.dec}}" aria-label="Moins" style="width: 32px; height: 32px; border: 1px solid #B9A88F; border-radius: 8px; background: #FFFFFF; color: #2A2522; cursor: pointer">−</button><strong style="min-width: 64px; text-align: center">{{sg.numLabel}}</strong><button onClick="{{sg.inc}}" aria-label="Plus" style="width: 32px; height: 32px; border: 1px solid #B9A88F; border-radius: 8px; background: #FFFFFF; color: #2A2522; cursor: pointer">+</button></div></sc-if>
+<sc-if value="{{sg.hasToggle}}" hint-placeholder-val="{{ true }}">
+<sc-if value="{{sg.on}}" hint-placeholder-val="{{ true }}"><button role="switch" aria-checked="true" aria-label="{{sg.label}}" onClick="{{sg.toggle}}" style="width: 52px; height: 30px; border: 0; border-radius: 999px; background: #2A2522; position: relative; cursor: pointer; flex: 0 0 auto"><span style="position: absolute; top: 4px; right: 4px; width: 22px; height: 22px; border-radius: 999px; background: #FFFFFF"></span></button></sc-if>
+<sc-if value="{{sg.off}}" hint-placeholder-val="{{ false }}"><button role="switch" aria-checked="false" aria-label="{{sg.label}}" onClick="{{sg.toggle}}" style="width: 52px; height: 30px; border: 0; border-radius: 999px; background: #C9BBA6; position: relative; cursor: pointer; flex: 0 0 auto"><span style="position: absolute; top: 4px; left: 4px; width: 22px; height: 22px; border-radius: 999px; background: #FFFFFF"></span></button></sc-if>
+</sc-if>
+</div>
+</sc-for>
+</div>
+</sc-if>
+
+<sc-if value="{{isRegFam}}" hint-placeholder-val="{{ false }}">
+<div style="display: flex; flex-direction: column; gap: 14px">
+<sc-if value="{{hasUnknown}}" hint-placeholder-val="{{ true }}">
+<section style="background: #FFF4E8; border: 1.5px solid #C2611F; border-radius: 14px; padding: 14px 18px; display: flex; align-items: center; gap: 14px; flex-wrap: wrap">
+<div style="flex: 1 1 320px"><strong style="color: #8A3E0E">Nouvel article vu dans SumUp :</strong> « Alchimie A5 » (vendu 2 fois en mai). Dans quelle famille le mettre ?</div>
+<button onClick="{{unknownPrints}}" style="min-height: 40px; padding: 0 14px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 700; cursor: pointer">Prints</button>
+<button onClick="{{unknownIgnore}}" style="min-height: 40px; padding: 0 12px; border: 1px solid #B9A88F; border-radius: 10px; background: transparent; color: #2A2522; cursor: pointer">Autre famille…</button>
+<button onClick="{{unknownIgnore}}" style="min-height: 40px; padding: 0 8px; border: 0; background: transparent; color: #4A4038; text-decoration: underline; cursor: pointer">Ne pas suivre</button>
+</section>
+</sc-if>
+<div style="display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: 18px; align-items: start">
+<div style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 14px; padding: 6px">
+<sc-for list="{{famList}}" as="fl" hint-placeholder-count="7">
+<sc-if value="{{fl.on}}" hint-placeholder-val="{{ false }}"><button onClick="{{fl.go}}" style="width: 100%; min-height: 52px; padding: 6px 12px; border: 0; border-radius: 10px; background: #EFE4D2; color: #2A2522; text-align: left; cursor: pointer; display: flex; flex-direction: column; justify-content: center"><strong>{{fl.name}}</strong><span style="font-size: 12px; color: #4A4038">{{fl.sub}}</span></button></sc-if>
+<sc-if value="{{fl.off}}" hint-placeholder-val="{{ true }}"><button onClick="{{fl.go}}" style="width: 100%; min-height: 52px; padding: 6px 12px; border: 0; border-radius: 10px; background: transparent; color: #2A2522; text-align: left; cursor: pointer; display: flex; flex-direction: column; justify-content: center"><span style="font-weight: 600">{{fl.name}}</span><span style="font-size: 12px; color: #4A4038">{{fl.sub}}</span></button></sc-if>
+</sc-for>
+</div>
+<div style="display: flex; flex-direction: column; gap: 14px">
+<section style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 14px; padding: 14px 18px; display: flex; flex-direction: column; gap: 6px">
+<h2 style="margin: 0; font-size: 18px">{{famDetail.name}}</h2>
+<p style="margin: 0; font-size: 14px; color: #4A4038; line-height: 1.45">Chaque ligne est une étape qu'on peut faire à part, à son rythme. Ce qu'elle donne est rangé en réserve (« fait maison ») jusqu'à l'étape suivante.</p>
+</section>
+<section style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 14px; overflow: hidden">
+<table class="tbl">
+<thead><tr><th>Étape</th><th>Utilise</th><th>Donne</th><th>Se fait par</th><th class="num">Temps</th></tr></thead>
+<tbody>
+<sc-for list="{{famDetail.trans}}" as="tr" hint-placeholder-count="3">
+<tr><td style="font-weight: 600">{{tr.label}}</td><td>{{tr.uses}}</td><td>{{tr.gives}}</td><td>{{tr.per}}</td><td class="num">{{tr.time}}</td></tr>
+</sc-for>
+</tbody>
+</table>
+</section>
+<sc-if value="{{stepFormClosed}}" hint-placeholder-val="{{ true }}"><button onClick="{{openStepForm}}" style="align-self: flex-start; min-height: 40px; padding: 0 14px; border: 1px dashed #B9A88F; border-radius: 10px; background: transparent; color: #2A2522; cursor: pointer">+ Ajouter une étape</button></sc-if>
+<sc-if value="{{stepFormOpen}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFDF9; border: 1.5px solid #2A2522; border-radius: 14px; padding: 16px 18px; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px">
+<div style="grid-column: 1 / -1; font-weight: 700">Nouvelle étape pour {{famDetail.name}}</div>
+<label style="display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600">Nom de l'étape<input type="text" placeholder="ex. Vernir les canards" style="min-height: 40px; border: 1px solid #B9A88F; border-radius: 8px; padding: 0 10px; font-size: 15px; font-weight: 400; background: #FFFFFF; color: #2A2522"></label>
+<label style="display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600">Elle donne<input type="text" placeholder="ex. 1 canard verni" style="min-height: 40px; border: 1px solid #B9A88F; border-radius: 8px; padding: 0 10px; font-size: 15px; font-weight: 400; background: #FFFFFF; color: #2A2522"></label>
+<label style="display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600">Elle utilise<input type="text" placeholder="choisir dans le stock : 1 canard découpé + vernis…" style="min-height: 40px; border: 1px solid #B9A88F; border-radius: 8px; padding: 0 10px; font-size: 15px; font-weight: 400; background: #FFFFFF; color: #2A2522"></label>
+<div style="display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600">Elle se fait<div style="display: flex; gap: 6px"><span style="padding: 8px 12px; border-radius: 999px; background: #2A2522; color: #FFFFFF; font-weight: 600; font-size: 13px">à la pièce</span><span style="padding: 8px 12px; border-radius: 999px; border: 1px solid #B9A88F; font-weight: 400; font-size: 13px">par matière entière</span></div></div>
+<label style="display: flex; flex-direction: column; gap: 4px; font-size: 14px; font-weight: 600">Temps<input type="text" placeholder="ex. 1 min par pièce" style="min-height: 40px; border: 1px solid #B9A88F; border-radius: 8px; padding: 0 10px; font-size: 15px; font-weight: 400; background: #FFFFFF; color: #2A2522"></label>
+<div style="display: flex; gap: 8px; align-items: flex-end; justify-content: flex-end"><button onClick="{{closeStepForm}}" style="min-height: 40px; padding: 0 12px; border: 0; background: transparent; color: #4A4038; text-decoration: underline; cursor: pointer">Annuler</button><button onClick="{{closeStepForm}}" style="min-height: 40px; padding: 0 16px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 700; cursor: pointer">Ajouter</button></div>
+</section>
+</sc-if>
+
+<section style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 14px; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px">
+<strong>Articles de la famille</strong>
+<div style="display: flex; flex-wrap: wrap; gap: 8px">
+<sc-for list="{{famArticles}}" as="fa" hint-placeholder-count="3"><span style="padding: 6px 12px; border-radius: 999px; border: 1px solid #B9A88F; font-size: 14px">{{fa.name}}</span></sc-for>
+</div>
+<div style="display: flex; gap: 8px; align-items: center; flex-wrap: wrap">
+<label for="new-art" style="font-size: 14px; font-weight: 600">Nouvel article</label>
+<input id="new-art" type="text" value="{{newArt}}" onChange="{{onNewArt}}" placeholder="nom tel qu'il apparaît dans SumUp" style="flex: 1 1 260px; min-height: 40px; border: 1px solid #B9A88F; border-radius: 8px; padding: 0 10px; font-size: 15px; background: #FFFFFF; color: #2A2522">
+<button onClick="{{addArt}}" style="min-height: 40px; padding: 0 16px; border: 0; border-radius: 10px; background: #2A2522; color: #FFFFFF; font-weight: 700; cursor: pointer">Ajouter</button>
+</div>
+<span style="font-size: 13px; color: #6B5D4F">Il reprend les étapes de la famille : rien d'autre à saisir.</span>
+</section>
+</div>
+</div>
+</div>
+</sc-if>
+
+<sc-if value="{{isRegPieces}}" hint-placeholder-val="{{ false }}">
+<section style="background: #FFFDF9; border: 1px solid #E2D6C3; border-radius: 14px; overflow: hidden">
+<table class="tbl">
+<thead><tr><th>Fourniture achetée</th><th class="num">Stock</th><th>S'achète par</th><th>Délai</th><th>Sert à</th></tr></thead>
+<tbody>
+<sc-for list="{{buyList}}" as="b" hint-placeholder-count="8">
+<tr><td style="font-weight: 600">{{b.name}}</td><td class="num">{{b.qty}}</td><td>{{b.lot}}</td><td>{{b.delay}}</td><td>{{b.used}}</td></tr>
+</sc-for>
+</tbody>
+</table>
+</section>
+</sc-if>
+</div>
+</sc-if>
+
+</div>
+</main>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+  constructor(props) {
+    super(props);
+    this.state = {
+      view: 'atelier', flash: '',
+      alertQty: '', alertSaved: false,
+      fam: 'Tous', counting: false, cnt: {},
+      q: {
+        canard: 2, can_dec: 40, cartonnette: 10, attache: 3, pochette_pl: 100, mdf: 3, carte_a4: 30,
+        sauge: 0, planch_vf: 0, buvard_bande: 6, carton_dec: 8, buvard: 15, elast: 30, carton_planche: 2,
+        kitm: 1, jeu_kit: 3, livret: 1, poch_kit: 5, lampe: 0, boitier: 4, cr2032: 10, led: 6, kraft: 20, papier_a3: 15, contre: 12,
+        scarab: 1, jeu_scarab: 16, cerclage: 0, print_a4: 25,
+        sieste: 0, sieste_imp: 4, carton_a5: 30, pochette_a5: 40, print_a3: 20,
+        t_miaou: 8, t_miaou_g: 6, cubes: 40, gomme: 2
+      },
+      edit: null, qty: '', real: '',
+      ach: { elast: 'todo', attache: 'todo', buvard: 'todo', encreur: 'todo', cubes: 'cmd', stickers: 'cmd' }, ask: null, achQty: '', over2: {},
+      targets: { sauge: [5, 2], gren: [4, 2], timbre: [3, 1], crane: [2, 1], baba: [0, 0], canard: [5, 2], kitm: [2, 1], kits: [2, 1], scarab: [2, 1], carnet: [4, 2], sieste: [2, 2] },
+      flags: { canard: true }, stepForm: false, newArt: '', extraArts: [], unknown: true, bilanOf: null,
+      links: { 0: null, 1: null },
+      set: { autoGroup: true, threshold: 14, margin: 30, marginOnce: true, workload: true, tamponCheck: true },
+      regTab: 'fam', regFam: 'Canard de poche'
+    };
+  }
+
+  renderVals() {
+    var self = this, st = this.state, Q = st.q;
+    function T(id) { var a = st.targets[id]; return a[0] + a[1]; }
+    function dur(m) { m = Math.round(m); var h = Math.floor(m / 60), r = m % 60; return h ? h + ' h' + (r ? ' ' + (r < 10 ? '0' : '') + r : '') : r + ' min'; }
+
+    // ---------- Catalogue : stocks à plusieurs niveaux ----------
+    var I = {
+      canard: { n: 'Canard de poche', fam: 'Canard de poche', k: 'vente', u: 'canards' },
+      can_dec: { n: 'Canards peints et découpés', fam: 'Canard de poche', k: 'maison', u: 'canards découpés', note: 'en boîte, prêts à monter' },
+      cartonnette: { n: 'Cartonnettes imprimées', fam: 'Canard de poche', k: 'maison', u: 'cartonnettes' },
+      attache: { n: 'Attaches de pin', fam: 'Canard de poche', k: 'achat', u: 'attaches' },
+      pochette_pl: { n: 'Pochettes plastique', fam: 'Canard de poche', k: 'achat', u: 'pochettes' },
+      carte_a4: { n: 'Feuilles de carte A4', fam: 'Canard de poche', k: 'achat', u: 'feuilles' },
+      mdf: { n: 'Plaques MDF A3', fam: 'Partagé', k: 'achat', u: 'plaques', note: 'canards, mini-presses' },
+      sauge: { n: 'Mini-presse Sauge', fam: 'Mini-presses', k: 'vente', u: 'presses' },
+      planch_vf: { n: 'Planchettes vert foncé (Sauge)', fam: 'Mini-presses', k: 'maison', u: 'planchettes' },
+      buvard_bande: { n: 'Bandes de buvard', fam: 'Mini-presses', k: 'maison', u: 'bandes' },
+      carton_dec: { n: 'Cartons découpés', fam: 'Mini-presses', k: 'maison', u: 'cartons' },
+      buvard: { n: 'Feuilles buvard Canson', fam: 'Mini-presses', k: 'achat', u: 'feuilles' },
+      elast: { n: 'Élastiques', fam: 'Mini-presses', k: 'achat', u: 'élastiques' },
+      carton_planche: { n: 'Planches de carton', fam: 'Mini-presses', k: 'recup', u: 'planches', note: 'récup, à garder de côté' },
+      kitm: { n: 'Kit Maison', fam: 'Kits', k: 'vente', u: 'kits' },
+      jeu_kit: { n: 'Jeux de 4 planchettes (Maison)', fam: 'Kits', k: 'maison', u: 'jeux' },
+      livret: { n: 'Livrets imprimés', fam: 'Kits', k: 'maison', u: 'livrets' },
+      poch_kit: { n: 'Pochettes imprimées', fam: 'Kits', k: 'maison', u: 'pochettes' },
+      lampe: { n: 'Lampes montées', fam: 'Kits', k: 'maison', u: 'lampes' },
+      boitier: { n: 'Boîtiers de pile', fam: 'Kits', k: 'achat', u: 'boîtiers' },
+      cr2032: { n: 'Piles CR2032', fam: 'Kits', k: 'achat', u: 'piles' },
+      led: { n: 'Mini LED', fam: 'Kits', k: 'achat', u: 'LED' },
+      kraft: { n: 'Papier kraft A4', fam: 'Kits', k: 'achat', u: 'feuilles' },
+      papier_a3: { n: 'Papier A3 (pochettes de kit)', fam: 'Kits', k: 'achat', u: 'feuilles' },
+      contre: { n: 'Contreplaqué A3', fam: 'Partagé', k: 'achat', u: 'plaques', note: 'kits, scarabées' },
+      scarab: { n: 'Scarabée', fam: 'Scarabée', k: 'vente', u: 'scarabées' },
+      jeu_scarab: { n: 'Jeux de planchettes scarabée', fam: 'Scarabée', k: 'maison', u: 'jeux', note: 'peints et découpés' },
+      cerclage: { n: 'Cerclages imprimés', fam: 'Scarabée', k: 'maison', u: 'cerclages' },
+      print_a4: { n: 'Papier print A4', fam: 'Scarabée', k: 'achat', u: 'feuilles' },
+      sieste: { n: 'Sieste dans les pâquerettes A5', fam: 'Prints', k: 'vente', u: 'prints' },
+      sieste_imp: { n: 'Sieste A5 imprimés, pas découpés', fam: 'Prints', k: 'maison', u: 'imprimés' },
+      carton_a5: { n: 'Cartons A5', fam: 'Prints', k: 'achat', u: 'cartons' },
+      pochette_a5: { n: 'Pochettes A5', fam: 'Prints', k: 'achat', u: 'pochettes' },
+      print_a3: { n: 'Papier print A3', fam: 'Prints', k: 'achat', u: 'feuilles' },
+      t_miaou: { n: 'Tampon Miaou', fam: 'Tampons', k: 'vente', u: 'tampons', note: 'suivi par comptage' },
+      t_miaou_g: { n: 'Gommes Miaou gravées, pas collées', fam: 'Tampons', k: 'maison', u: 'gommes' },
+      cubes: { n: 'Cubes en bois', fam: 'Tampons', k: 'achat', u: 'cubes' },
+      gomme: { n: 'Feuilles de gomme A4', fam: 'Tampons', k: 'achat', u: 'feuilles' }
+    };
+    // Étapes : ce qu'une fois « run » utilise et donne. whole = se fait par unité de matière entière.
+    var TR = {
+      can_dec: { label: 'Peindre et découper une planche de canards', verb: 'planche', in: { mdf: 1 }, out: 50, min: 40, whole: 'planche' },
+      cartonnette: { label: 'Imprimer et découper des cartonnettes', in: { carte_a4: 1 }, out: 12, min: 5, whole: 'feuille' },
+      canard: { label: 'Monter des canards', in: { can_dec: 1, attache: 1, cartonnette: 1, pochette_pl: 1 }, out: 1, min: 1 },
+      planch_vf: { label: 'Peindre en vert foncé et découper une plaque', in: { mdf: 1 }, out: 23, min: 30, whole: 'plaque' },
+      buvard_bande: { label: 'Découper des feuilles de buvard en bandes', in: { buvard: 1 }, out: 3, min: 2, whole: 'feuille' },
+      carton_dec: { label: 'Découper une planche de carton', in: { carton_planche: 1 }, out: 16, min: 10, whole: 'planche' },
+      sauge: { label: 'Monter des mini-presses Sauge', in: { planch_vf: 2, buvard_bande: 3, carton_dec: 2, elast: 2 }, out: 1, min: 3 },
+      jeu_kit: { label: 'Découper des jeux de planchettes', in: { contre: 1 }, out: 1, min: 15, whole: 'plaque' },
+      livret: { label: 'Imprimer des livrets', in: { kraft: 1 }, out: 1, min: 2, whole: 'feuille' },
+      poch_kit: { label: 'Imprimer des pochettes', in: { papier_a3: 1 }, out: 1, min: 2, whole: 'feuille' },
+      lampe: { label: 'Monter des lampes', in: { boitier: 1, cr2032: 1, led: 1 }, out: 1, min: 4 },
+      kitm: { label: 'Assembler des kits Maison', in: { jeu_kit: 1, livret: 1, poch_kit: 1, lampe: 1 }, out: 1, min: 5 },
+      jeu_scarab: { label: 'Peindre et découper une série de scarabées', in: { contre: 4 }, out: 16, min: 90, whole: 'série de 4 plaques' },
+      cerclage: { label: 'Imprimer et découper des cerclages', in: { print_a4: 1 }, out: 5, min: 4, whole: 'feuille' },
+      scarab: { label: 'Monter des scarabées', in: { jeu_scarab: 1, cerclage: 1 }, out: 1, min: 4 },
+      sieste_imp: { label: 'Imprimer des Sieste A5', in: { print_a3: 1 }, out: 4, min: 5, whole: 'feuille A3' },
+      sieste: { label: 'Découper et emballer des Sieste A5', in: { sieste_imp: 1, carton_a5: 1, pochette_a5: 1 }, out: 1, min: 2 },
+      t_miaou_g: { label: 'Graver des gommes Miaou', in: { gomme: 0.1 }, out: 1, min: 3 },
+      t_miaou: { label: 'Coller des tampons Miaou', in: { t_miaou_g: 1, cubes: 1 }, out: 1, min: 1 }
+    };
+    function fmt(n) { return Math.round(n * 10) / 10; }
+
+    // ---------- Salons et regroupement ----------
+    var salons = [
+      { name: 'Festival de Noël (exemple)', dates: '12–13 déc.', days: '2 jours', type: 'Festival', visitors: '~12 000 visiteurs' },
+      { name: 'Marché d’hiver', dates: '20 déc.', days: '1 jour', type: 'Marché', visitors: '~1 500 visiteurs' },
+      { name: 'Salon d’artisans', dates: '17 janv.', days: '1 jour', type: 'Salon d’artisans', visitors: '~2 000 visiteurs' }
+    ];
+    var gaps = [7, 28];
+    function grouped(i) { return st.links[i] !== null ? st.links[i] : (st.set.autoGroup && gaps[i] < st.set.threshold); }
+    var groups = [[0]];
+    for (var gi0 = 0; gi0 < gaps.length; gi0++) { if (grouped(gi0)) groups[groups.length - 1].push(gi0 + 1); else groups.push([gi0 + 1]); }
+    var groupOf = {};
+    groups.forEach(function (g, gi) { g.forEach(function (s) { groupOf[s] = gi; }); });
+    var first = groups[0], multi = first.length > 1;
+    var prepName = first.map(function (s) { return salons[s].name; }).join(' + ');
+    var prepDates = first.map(function (s) { return salons[s].dates; }).join(' · ');
+    var prepWhy = multi ? 'Pas le temps de refaire du stock entre les deux.' : 'Un seul salon dans cette préparation.';
+    var colors = ['#7A4E22', '#3F6B8A', '#6B5D4F'];
+    var timeline = [];
+    salons.forEach(function (s, si) {
+      var g = groupOf[si];
+      timeline.push({ isSalon: true, isGap: false, name: s.name, dates: s.dates, days: s.days, type: s.type, visitors: s.visitors, color: colors[g % colors.length], group: 'Préparation ' + (g + 1) + (groups[g].length > 1 ? ' (' + groups[g].length + ' salons)' : '') });
+      if (si < gaps.length) {
+        var gp = grouped(si), man = st.links[si] !== null;
+        timeline.push({ isSalon: false, isGap: true, gapLabel: gaps[si] + ' jours entre les deux', grouped: gp, separate: !gp, manual: man, toggleLabel: gp ? 'Séparer' : 'Regrouper',
+          toggle: function () { var l = Object.assign({}, st.links); l[si] = !gp; self.setState({ links: l }); },
+          reset: function () { var l = Object.assign({}, st.links); l[si] = null; self.setState({ links: l }); } });
+      }
+    });
+    function tgt(id) { return multi ? T(id) : st.targets[id][0]; }
+    function splitLabel(id) { return multi ? 'Noël ' + st.targets[id][0] + ' + Hiver ' + st.targets[id][1] : String(st.targets[id][0]); }
+    var pastSalons = [
+      { name: 'Marché de Noël de Lucas', when: '11/12/2025, ~2 h', type: 'Marché', days: '1', vis: '~200', ca: '75 €', tamp: '—', per: '— (pas encore de tampons)' },
+      { name: 'Festival de jeux de société', when: '8–10/05/2026', type: 'Festival', days: '3', vis: '~35 000', ca: '2 131 €', tamp: '~214', per: '6,1' },
+      { name: 'Petit festival de musique', when: '31/05/2026', type: 'Festival (petit)', days: '1', vis: '~800', ca: '68 €', tamp: '~16', per: '20' },
+      { name: 'Marchés d\u2019été du camping', when: '6 soirées, 7/07 → 25/08', type: 'Marché du soir', days: '6', vis: '~150 / soir', ca: '148 €', tamp: '~17', per: '19' },
+      { name: 'Art to Play', when: '14–15/11/2026', type: 'Convention', days: '2', vis: '~20 000', ca: '772 €', tamp: '~101', per: '5,0' }
+    ].map(function (p) { return Object.assign(p, { open: function () { self.setState({ view: 'bilan', bilanOf: p.name, flash: '' }); } }); });
+
+    // ---------- Atelier : on remonte la chaîne seulement si la réserve ne suffit pas ----------
+    var avail = Object.assign({}, Q);
+    var totalMin = 0;
+    function planFor(item, need, steps, depth) {
+      var t = TR[item];
+      var runs = t.whole ? Math.ceil(need / t.out) : need;
+      var produced = runs * t.out;
+      var inputs = [];
+      Object.keys(t.in).forEach(function (src) {
+        var req = fmt(runs * t.in[src]);
+        var have = avail[src] || 0;
+        if (have >= req) { avail[src] = have - req; inputs.push({ ok: true, made: false, short: false, text: req + ' ' + I[src].u + ' (' + Q[src] + ' en stock)' }); }
+        else {
+          var missing = fmt(req - have);
+          avail[src] = 0;
+          if (TR[src] && depth < 4) {
+            planFor(src, missing, steps, depth + 1);
+            avail[src] = Math.max(0, (avail[src] || 0) - missing);
+            inputs.push({ ok: false, made: true, short: false, text: req + ' ' + I[src].u + ' : ' + have + ' en stock + ' + missing + ' à faire avant' });
+          } else {
+            inputs.push({ ok: false, made: false, short: true, text: req + ' ' + I[src].u + ' : il en manque ' + missing + (I[src].k === 'recup' ? ' (récup à trouver)' : ' → À acheter') });
+          }
+        }
+      });
+      totalMin += runs * t.min;
+      var e = st.edit && st.edit.tr === item ? st.edit : null;
+      var unitLabel = t.whole ? (runs > 1 ? t.whole + 's' : t.whole) : I[item].u;
+      var shortInput = null;
+      Object.keys(t.in).forEach(function (src) { if (!TR[src] && (Q[src] || 0) < runs * t.in[src] && !shortInput) shortInput = src; });
+      var step = {
+        label: t.whole ? t.label + (runs > 1 ? ' (× ' + runs + ')' : '') : t.label.replace('des ', runs + ' '),
+        gives: '→ +' + produced + ' ' + I[item].u + (produced > need ? ' (' + fmt(produced - need) + ' iront en réserve)' : ''),
+        inputs: inputs, time: dur(runs * t.min),
+        editing: !!e, closed: !e
+      };
+      if (e) {
+        var typed = parseInt(st.qty, 10) || 0;
+        var lim = shortInput;
+        Object.assign(step, {
+          askQty: e.step === 'qty', askReal: e.step === 'real',
+          qtyLabel: t.whole ? 'Combien de ' + t.whole + 's avez-vous faites ?' : 'Combien en avez-vous fait ?',
+          unitLabel: t.whole ? '(1 ' + t.whole + ' = ' + t.out + ' ' + I[item].u + ')' : I[item].u,
+          placeholder: 'conseillé : ' + runs,
+          hasWarn: !!lim && Math.max(typed, runs) * t.in[lim] > (Q[lim] || 0),
+          warn: lim ? 'Il n’y a normalement que ' + Q[lim] + ' ' + I[lim].u + ' en stock.' : '',
+          realMsg: lim ? 'Selon l’outil, il ne restait que ' + Q[lim] + ' ' + I[lim].u + '.' : '',
+          realLabel: lim ? 'Combien de ' + I[lim].u + ' aviez-vous vraiment avant de commencer ?' : '',
+          save: function () {
+            var n = parseInt(st.qty, 10) || 0; if (n <= 0) return;
+            if (lim && n * t.in[lim] > (Q[lim] || 0)) { self.setState({ edit: Object.assign({}, e, { step: 'real' }), real: '' }); return; }
+            apply(item, n, null);
+          },
+          saveReal: function () { apply(item, parseInt(st.qty, 10) || 0, { id: lim, v: parseInt(st.real, 10) || 0 }); },
+          backQty: function () { self.setState({ edit: Object.assign({}, e, { step: 'qty' }) }); },
+          cancel: function () { self.setState({ edit: null }); }
+        });
+      }
+      step.open = function () { self.setState({ edit: { tr: item, step: 'qty' }, qty: '', real: '', flash: '' }); };
+      avail[item] = (avail[item] || 0) + produced;
+      steps.push(step);
+    }
+    function apply(item, runs, fixInput) {
+      var t = TR[item], q = Object.assign({}, st.q), msg = '';
+      if (fixInput) { q[fixInput.id] = fixInput.v; msg = I[fixInput.id].n + ' recalé à ' + fixInput.v + '. '; }
+      Object.keys(t.in).forEach(function (src) { q[src] = Math.max(0, fmt((q[src] || 0) - runs * t.in[src])); });
+      q[item] = (q[item] || 0) + runs * t.out;
+      msg += '« ' + t.label + ' » : +' + (runs * t.out) + ' ' + I[item].u + '. ' + I[item].n + ' : ' + q[item] + ' en stock.';
+      self.setState({ q: q, edit: null, qty: '', real: '', flash: msg });
+    }
+
+    var goals = ['canard', 'sauge', 'kitm', 'scarab', 'sieste'];
+    var plans = [], done = [];
+    goals.forEach(function (id) {
+      var target = tgt(id), ready = Q[id], missing = Math.max(0, target - ready);
+      if (missing === 0) { done.push(I[id].n + ' (' + ready + ' / ' + target + ')'); return; }
+      var steps = [];
+      planFor(id, missing, steps, 0);
+      steps.forEach(function (s, i) { s.n = i + 1; });
+      var res = Object.keys(I).filter(function (k) { return I[k].fam === I[id].fam && I[k].k === 'maison' && Q[k] > 0; }).map(function (k) { return Q[k] + ' ' + I[k].u; });
+      plans.push({ name: I[id].n, target: target, split: splitLabel(id), ready: ready, missing: missing, steps: steps, reserve: res.length ? 'En réserve : ' + res.join(', ') : 'Rien en réserve' });
+    });
+
+    // ---------- Stock ----------
+    var famNames = ['Tous', 'Canard de poche', 'Mini-presses', 'Kits', 'Scarabée', 'Prints', 'Tampons', 'Partagé'];
+    var famFilters = famNames.map(function (n) { return { name: n, sel: st.fam === n, unsel: st.fam !== n, pick: function () { self.setState({ fam: n }); } }; });
+    var diffs = 0;
+    var kindOrder = { vente: 0, maison: 1, achat: 2, recup: 3 };
+    var stockGroups = famNames.slice(1).filter(function (f) { return st.fam === 'Tous' || st.fam === f; }).map(function (f) {
+      var ids = Object.keys(I).filter(function (k) { return I[k].fam === f; }).sort(function (a, b) { return kindOrder[I[a].k] - kindOrder[I[b].k]; });
+      return { name: f === 'Partagé' ? 'Fournitures partagées' : f, rows: ids.map(function (k) {
+        var it = I[k], cv = st.cnt[k];
+        var hasDiff = st.counting && cv !== undefined && cv !== '' && parseInt(cv, 10) !== Q[k];
+        if (hasDiff) diffs++;
+        var dv = hasDiff ? parseInt(cv, 10) - Q[k] : 0;
+        return {
+          name: it.n, qty: Q[k], note: it.note || '',
+          isVente: it.k === 'vente', isMaison: it.k === 'maison', isAchat: it.k === 'achat' || it.k === 'recup', kindLabel: it.k === 'recup' ? 'Récup' : 'Acheté',
+          countMode: st.counting, normalMode: !st.counting, inputId: 'c-' + k, counted: cv !== undefined ? cv : '',
+          hasDiff: hasDiff, diff: (dv > 0 ? '+' : '') + dv,
+          onCount: function (ev) { var c = Object.assign({}, st.cnt); c[k] = ev.target.value; self.setState({ cnt: c }); },
+          fix: function () { var c = {}; c[k] = ''; self.setState({ counting: true, cnt: c, flash: 'Tapez combien vous avez de « ' + it.n + ' », puis enregistrez.' }); }
+        };
+      }) };
+    });
+
+    // ---------- Achats ----------
+    var achDefs = {
+      attache: { name: 'Attaches de pin', order: '2 au minimum', deadline: '28/11', why: 'Monter 5 canards en demande 5 − 3 en stock = 2.', where: 'Lot de ? (noté à la réception)' },
+      elast: { name: 'Élastiques', order: '0 pour l’instant', deadline: '—', why: '14 nécessaires (7 presses × 2), 30 en stock. Ligne gardée pour l’exemple.', where: '' },
+      buvard: { name: 'Feuilles buvard Canson', order: '1 paquet (12)', deadline: '28/11', why: '5 feuilles à découper en bandes, 15 en stock : il en restera 10, sous le seuil de 12.', where: 'Paquet de 12' },
+      encreur: { name: 'Encreurs VersaFine', order: 'Tout le dispo', deadline: 'Dès que possible', why: 'Environ 10 pour ces marchés. Le fournisseur se vide avant les festivals.', where: 'Confiance faible' },
+      cubes: { name: 'Cubes en bois', order: 'Lot de 90 · commandé le 10/11' },
+      stickers: { name: 'Feuilles de stickers ronds', order: 'Commandé le 12/11' }
+    };
+    function setAch(id, v) { var a = Object.assign({}, st.ach); a[id] = v; return a; }
+    var achTodo = [], achCmd = [];
+    Object.keys(achDefs).forEach(function (id) {
+      var d = achDefs[id];
+      if (st.ach[id] === 'todo') {
+        var asking = !!st.ask && st.ask.id === id;
+        achTodo.push(Object.assign({}, d, { order: st.over2[id] || d.order, idle: !asking, asking: asking, askLabel: asking && st.ask.kind === 'have' ? 'Vous en avez vraiment :' : 'Quantité :',
+          ok: function () { self.setState({ ach: setAch(id, 'cmd') }); },
+          have: function () { self.setState({ ask: { id: id, kind: 'have' }, achQty: '' }); },
+          edit: function () { self.setState({ ask: { id: id, kind: 'edit' }, achQty: '' }); },
+          confirm: function () {
+            if (st.ask.kind === 'have') self.setState({ ask: null, ach: setAch(id, 'ok'), flash: d.name + ' : compté ' + (st.achQty || 0) + ', la ligne est recalculée.' });
+            else { var o = Object.assign({}, st.over2); o[id] = st.achQty || '0'; self.setState({ ask: null, over2: o }); }
+          } }));
+      } else if (st.ach[id] === 'cmd') {
+        achCmd.push({ name: d.name, order: d.order.indexOf('ommandé') >= 0 ? d.order : (st.over2[id] || d.order) + ' · commandé aujourd’hui', recv: function () { self.setState({ ach: setAch(id, 'recu'), flash: d.name + ' : réception notée.' }); } });
+      }
+    });
+
+    // ---------- Objectifs (tampons = thermomètre) ----------
+    var mg = 1 + st.set.margin / 100;
+    var thermo = [
+      { name: 'Festival de Noël (exemple)', ref: 'gros salons : festival de jeux (6,1), Art to Play (5,0)', calc: '≈ 5,6 tampons pour 1 000 visiteurs × 12 000', n: 67 },
+      { name: 'Marché d’hiver (exemple)', ref: 'petits : festival de musique (20), camping (19)', calc: '≈ 19,4 pour 1 000 × 1 500', n: 29 }
+    ];
+    var famR = { 'Mini-presses': [15.8, 'Art to Play'], 'Canard de poche': [6.1, 'festival de jeux'], 'Kits': [4.7, 'festival de jeux'], 'Scarabée': [2.8, 'festival de jeux'], 'Carnet': [5.1, 'festival de jeux'] };
+    var objDefs = [
+      { id: 'sauge', name: 'Mini-presse Sauge', fam: 'Mini-presses', sh: 18 / 49 }, { id: 'gren', name: 'Mini-presse Grenouille', fam: 'Mini-presses', sh: 15 / 49 },
+      { id: 'timbre', name: 'Mini-presse Timbre', fam: 'Mini-presses', sh: 9 / 49 }, { id: 'crane', name: 'Mini-presse Crâne', fam: 'Mini-presses', sh: 6 / 49 },
+      { id: 'baba', name: 'Mini-presse Baba Yaga', fam: 'Mini-presses', sh: 1 / 49 },
+      { id: 'canard', name: 'Canard de poche', fam: 'Canard de poche', sh: 1 },
+      { id: 'kitm', name: 'Kit Maison', fam: 'Kits', sh: 8 / 14 }, { id: 'kits', name: 'Kit Serre', fam: 'Kits', sh: 6 / 14 },
+      { id: 'scarab', name: 'Scarabée', fam: 'Scarabée', sh: 1 }, { id: 'carnet', name: 'Carnet', fam: 'Carnet', sh: 1 }
+    ];
+    var objRows = objDefs.map(function (o) {
+      var r = famR[o.fam];
+      function bump(i, dl) { var t = Object.assign({}, st.targets), a = t[o.id].slice(); a[i] = Math.max(0, a[i] + dl); t[o.id] = a; self.setState({ targets: t }); }
+      return {
+        name: o.name, ratio: r[0] + ' (' + r[1] + ')',
+        share: o.sh < 1 ? Math.round(o.sh * 100) + ' % des ventes de la famille' : '',
+        total: T(o.id),
+        per: [67, 29].map(function (tp, i) { return { n: st.targets[o.id][i], reco: Math.round(tp * r[0] / 100 * o.sh * mg), inc: function () { bump(i, 1); }, dec: function () { bump(i, -1); } }; })
+      };
+    });
+    var bilanDefs = [['Tampons', '101 (équiv.)', '100'], ['Encreurs VersaFine', '25', '24,8'], ['Mini-presses', '16', '15,8'], ['Carnets', '4', '4,0'], ['Kits', '3', '3,0'], ['Canard de poche', '1', '1,0', 'canard'], ['Scarabée', '1', '1,0'], ['Prints (Hervine)', '2', '2,0'], ['Lanternes (fin de série)', '2', '—']];
+    var bilanRows = bilanDefs.map(function (b) {
+      var key = b[3] || b[0], fl = !!st.flags[key];
+      return { name: b[0], sold: b[1], ratio: b[2], flag: fl, noFlag: !fl, toggle: function () { var f = Object.assign({}, st.flags); f[key] = !fl; self.setState({ flags: f }); } };
+    });
+
+    // ---------- Réglages ----------
+    function setS(k, v) { var s = Object.assign({}, st.set); s[k] = v; self.setState({ set: s }); }
+    var settings = [
+      { k: 'autoGroup', label: 'Regrouper les salons rapprochés', help: 'Propose de préparer ensemble les salons trop proches pour refaire du stock entre eux. Vous pouvez toujours séparer ou regrouper à la main.' },
+      { k: 'threshold', label: 'Écart minimum pour refaire du stock', help: 'En dessous, deux salons sont proposés ensemble.', num: true, unit: ' jours', step: 1 },
+      { k: 'margin', label: 'Marge de sécurité sur les objectifs conseillés', help: 'Ajoutée aux ventes prévues.', num: true, unit: ' %', step: 5 },
+      { k: 'marginOnce', label: 'Une seule marge par préparation', help: 'Si plusieurs salons sont préparés ensemble, la marge s’applique une fois sur le total.' },
+      { k: 'workload', label: 'Afficher le temps de travail restant', help: 'Additionne le temps des étapes à faire. Demande un temps par étape dans Familles et recettes.' },
+      { k: 'tamponCheck', label: 'Contrôle de cohérence des tampons', help: 'Compare les ventes SumUp aux écarts comptés avant/après salon.' }
+    ].map(function (sg) {
+      var v = st.set[sg.k];
+      return { label: sg.label, help: sg.help, hasNum: !!sg.num, hasToggle: !sg.num, on: !!v, off: !v, numLabel: v + (sg.unit || ''),
+        toggle: function () { setS(sg.k, !v); }, inc: function () { setS(sg.k, v + sg.step); }, dec: function () { setS(sg.k, Math.max(0, v - sg.step)); } };
+    });
+    var regTabs = [{ id: 'fonct', label: 'Fonctionnement' }, { id: 'fam', label: 'Familles et recettes' }, { id: 'pieces', label: 'Fournitures' }].map(function (t) { return { label: t.label, on: st.regTab === t.id, off: st.regTab !== t.id, go: function () { self.setState({ regTab: t.id }); } }; });
+    var famForTr = { 'Canard de poche': ['can_dec', 'cartonnette', 'canard'], 'Mini-presses': ['planch_vf', 'buvard_bande', 'carton_dec', 'sauge'], 'Kits': ['jeu_kit', 'livret', 'poch_kit', 'lampe', 'kitm'], 'Scarabée': ['jeu_scarab', 'cerclage', 'scarab'], 'Prints': ['sieste_imp', 'sieste'], 'Tampons': ['t_miaou_g', 't_miaou'] };
+    var famList = Object.keys(famForTr).map(function (f) { return { name: f, sub: famForTr[f].length + ' étapes', on: st.regFam === f, off: st.regFam !== f, go: function () { self.setState({ regFam: f }); } }; });
+    var famArtsBase = { 'Canard de poche': ['Canard de poche'], 'Mini-presses': ['Baba Yaga', 'Crâne', 'Grenouille', 'Sauge', 'Timbre'], 'Kits': ['Kit Maison', 'Kit Serre'], 'Scarabée': ['Scarabée'], 'Prints': ['11 dessins × A5 / A4 / A3'], 'Tampons': ['25 motifs'] };
+    var famArticles = (famArtsBase[st.regFam] || []).concat(st.extraArts.filter(function (x) { return x.fam === st.regFam; }).map(function (x) { return x.name; })).map(function (n) { return { name: n }; });
+    var famDetail = { name: st.regFam, trans: famForTr[st.regFam].map(function (k) {
+      var t = TR[k];
+      return { label: t.label, uses: Object.keys(t.in).map(function (s) { return t.in[s] + ' ' + I[s].n.toLowerCase(); }).join(' + '), gives: t.out + ' ' + I[k].u, per: t.whole ? t.whole + ' entière' : 'à la pièce', time: t.min + ' min' + (t.whole ? ' / ' + t.whole : ' / pièce') };
+    }) };
+    var buyList = Object.keys(I).filter(function (k) { return I[k].k === 'achat' || I[k].k === 'recup'; }).map(function (k) { return { name: I[k].n + (I[k].k === 'recup' ? ' (récup)' : ''), qty: Q[k], lot: '?', delay: '?', used: I[k].note || I[k].fam }; });
+
+    // ---------- Navigation ----------
+    var v = st.view;
+    var titles = { stock: st.counting ? 'Comptage' : 'Stock', atelier: 'Atelier', achats: 'À acheter', salons: 'Salons', objectifs: 'Objectifs · ' + prepName, bilan: 'Bilan', reglages: 'Réglages' };
+    var nav = [['stock', 'Stock', st.alertSaved ? '' : '1 question'], ['atelier', 'Atelier', plans.length ? plans.length + ' à préparer' : ''], ['achats', 'À acheter', achTodo.length ? achTodo.length + ' à valider' : ''], ['salons', 'Salons', ''], ['reglages', 'Réglages', '']].map(function (n) {
+      var on = v === n[0] || ((v === 'objectifs' || v === 'bilan') && n[0] === 'salons');
+      return { label: n[1], badge: n[2], hasBadge: !!n[2], on: on, off: !on, go: function () { self.setState({ view: n[0], edit: null, flash: '', counting: false, cnt: {} }); } };
+    });
+    var mainActionLabel = '', mainAction = null;
+    if (v === 'stock' && !st.counting) { mainActionLabel = 'Faire un comptage'; mainAction = function () { self.setState({ counting: true, cnt: {}, flash: '' }); }; }
+    if (v === 'salons') { mainActionLabel = 'Nouveau salon'; mainAction = function () {}; }
+
+    return {
+      nav: nav, prepName: prepName, prepDates: prepDates, prepWhy: prepWhy,
+      title: v === 'bilan' ? 'Bilan · ' + (st.bilanOf || '') : titles[v], hasBack: v === 'objectifs' || v === 'bilan', back: function () { self.setState({ view: 'salons' }); },
+      isBilan: v === 'bilan', bilanRows: bilanRows, pastSalons: pastSalons, thermo: thermo, marginPct: st.set.margin,
+      stepFormOpen: st.stepForm, stepFormClosed: !st.stepForm, openStepForm: function () { self.setState({ stepForm: true }); }, closeStepForm: function () { self.setState({ stepForm: false }); },
+      famArticles: famArticles, newArt: st.newArt, onNewArt: function (e) { self.setState({ newArt: e.target.value }); },
+      addArt: function () { if (!st.newArt) return; self.setState({ extraArts: st.extraArts.concat([{ fam: st.regFam, name: st.newArt }]), newArt: '', flash: '« ' + st.newArt + ' » ajouté à ' + st.regFam + '.' }); },
+      hasUnknown: st.unknown,
+      unknownPrints: function () { self.setState({ unknown: false, extraArts: st.extraArts.concat([{ fam: 'Prints', name: 'Alchimie (A5 / A4 / A3)' }]), regFam: 'Prints', flash: '« Alchimie » ajouté aux Prints : ses ventes sont maintenant suivies.' }); },
+      unknownIgnore: function () { self.setState({ unknown: false, flash: '« Alchimie A5 » ne sera pas suivi.' }); },
+      hasMainAction: !!mainAction, mainAction: mainAction, mainActionLabel: mainActionLabel,
+      flash: st.flash, hasFlash: !!st.flash,
+      isStock: v === 'stock', isAtelier: v === 'atelier', isAchats: v === 'achats', isSalons: v === 'salons', isObjectifs: v === 'objectifs', isReglages: v === 'reglages',
+      showAlert: !st.alertSaved, alertQty: st.alertQty,
+      onAlertQty: function (e) { self.setState({ alertQty: e.target.value }); },
+      validateAlert: function () { if (st.alertQty !== '') self.setState({ alertSaved: true, flash: 'Noté : ' + st.alertQty + ' Sieste A5. Question suivante dans le bandeau.' }); },
+      famFilters: famFilters, stockGroups: stockGroups, counting: st.counting, countDiffs: diffs,
+      cancelCount: function () { self.setState({ counting: false, cnt: {}, flash: '' }); },
+      saveCount: function () {
+        var q = Object.assign({}, st.q);
+        Object.keys(st.cnt).forEach(function (k) { if (st.cnt[k] === '') return; q[k] = parseInt(st.cnt[k], 10) || 0; });
+        self.setState({ q: q, counting: false, cnt: {}, flash: 'Comptage enregistré : ' + diffs + ' écart(s) corrigé(s).' });
+      },
+      plans: plans, hasDone: done.length > 0, doneList: done.join(', '), workLabel: dur(totalMin),
+      qty: st.qty, onQty: function (e) { self.setState({ qty: e.target.value }); },
+      real: st.real, onReal: function (e) { self.setState({ real: e.target.value }); },
+      achTodo: achTodo, achCmd: achCmd, achQty: st.achQty, onAchQty: function (e) { self.setState({ achQty: e.target.value }); },
+      timeline: timeline, thresholdLabel: st.set.autoGroup ? 'moins de ' + st.set.threshold + ' jours d’écart' : 'regroupement automatique désactivé',
+      phases: [{ label: 'Objectifs', when: 'avant le 20/11' }, { label: 'Comptage avant', when: 'le 11/12' }, { label: 'Comptages au retour', when: multi ? '14/12 et 21/12' : '14/12' }, { label: 'Bilan', when: 'automatique' }].map(function (p, i) { return Object.assign(p, { current: i === 0, done: false, todo: i > 0 }); }),
+      goObjectifs: function () { self.setState({ view: 'objectifs' }); },
+      objRows: objRows, marginNote: multi && st.set.marginOnce ? ', + ' + st.set.margin + ' % une seule fois sur le total des marchés' : ', + ' + st.set.margin + ' % par salon',
+      saveObj: function () { self.setState({ view: 'salons', flash: 'Objectifs enregistrés.' }); },
+      regTabs: regTabs, isRegFonct: st.regTab === 'fonct', isRegFam: st.regTab === 'fam', isRegPieces: st.regTab === 'pieces',
+      settings: settings, famList: famList, famDetail: famDetail, buyList: buyList
+    };
+  }
+}
+</script>
+</body>
+</html>
