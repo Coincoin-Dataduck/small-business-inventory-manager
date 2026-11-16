@@ -1,6 +1,6 @@
 import { HTTPException } from "hono/http-exception";
 
-export type Env = { DB: D1Database; SUMUP_API_KEY?: string };
+export type Env = { DB: D1Database; SUMUP_API_KEY?: string; SUMUP_BASE?: string };
 
 export const NIVEAUX = ["a_vendre", "fait_maison", "achete", "recup"] as const;
 export const SUIVIS = ["quantite", "sans_quantite", "generique"] as const;

@@ -4,6 +4,8 @@ import { Env, NIVEAUX, SUIVIS, STOCK_SQL, erreur, texte, entier, choix, corps, l
 import { recettes } from "./recettes";
 import { salons } from "./salons";
 import { atelier } from "./atelier";
+import { questions } from "./questions";
+import { importer } from "./sumup";
 const app = new Hono<{ Bindings: Env }>().basePath("/api");
 
 // ───────────── Familles ─────────────
@@ -129,6 +131,7 @@ app.post("/comptages", async (c) => {
 app.route("/", recettes);
 app.route("/", salons);
 app.route("/", atelier);
+app.route("/", questions);
 
 app.onError((e, c) => {
   if (e instanceof HTTPException) return c.json({ erreur: e.message }, e.status);
@@ -137,4 +140,10 @@ app.onError((e, c) => {
 });
 app.notFound((c) => c.json({ erreur: "Adresse inconnue." }, 404));
 
-export default app;
+export default {
+  fetch: app.fetch,
+  // Cron : import des ventes SumUp par tranches.
+  async scheduled(_evt: ScheduledController, env: Env, ctx: ExecutionContext) {
+    ctx.waitUntil(importer(env, 40).then((b) => { if (b.erreur) console.error("Import SumUp :", b.erreur); }));
+  },
+} satisfies ExportedHandler<Env>;

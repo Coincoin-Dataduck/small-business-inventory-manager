@@ -11,7 +11,7 @@ const PAGES = [
   { id: "atelier", label: "Atelier" },
   { id: "achats", label: "À acheter", bientot: true },
   { id: "salons", label: "Salons" },
-  { id: "questions", label: "Questions", bientot: true },
+  { id: "questions", label: "Questions" },
   { id: "reglages", label: "Réglages" },
 ];
 
@@ -60,6 +60,7 @@ function signe(n) { return n > 0 ? "+" + n : String(n); }
 const etat = {
   page: "stock", filtre: null, comptage: null, ligneEnCours: null, stock: [], familles: [], edition: null,
   etapes: [], editeur: null, fait: null, faites: [],
+  questions: [], nbQuestions: null, import: null, correspondances: [], corrEdition: null,
   params: [], salons: null, salonEdition: null, objectifs: null, plan: null, comptageAvant: null,
 };
 
@@ -80,7 +81,8 @@ function dessinerMenu() {
         disabled: p.bientot,
         title: p.bientot ? "Pas encore construit" : null,
         onclick: () => { location.hash = p.id; },
-      }, p.label, p.bientot ? h("span", { class: "bientot" }, "bientôt") : null),
+      }, p.label, p.bientot ? h("span", { class: "bientot" }, "bientôt") : null,
+        p.id === "questions" && etat.nbQuestions ? h("span", { class: "pastille-nb" }, etat.nbQuestions) : null),
     ),
   );
 }
@@ -88,11 +90,13 @@ function dessinerMenu() {
 async function afficher() {
   etat.page = pageCourante();
   dessinerMenu();
+  if (etat.page !== "questions") compterQuestions();
   await tenter(async () => {
     if (etat.page === "stock") await pageStock();
     if (etat.page === "reglages") await pageReglages();
     if (etat.page === "atelier") await pageAtelier();
     if (etat.page === "salons") await pageSalons();
+    if (etat.page === "questions") await pageQuestions();
     if (etat.page === "objectifs") await pageObjectifs(Number(etat.params[0]));
   });
 }
@@ -289,7 +293,7 @@ async function sauverComptage() {
 
 // ───────────── Réglages : familles et pièces ─────────────
 async function pageReglages() {
-  [etat.familles, etat.stock, etat.etapes] = await Promise.all([api("/familles"), api("/stock"), api("/etapes")]);
+  [etat.familles, etat.stock, etat.etapes, etat.correspondances] = await Promise.all([api("/familles"), api("/stock"), api("/etapes"), api("/correspondances")]);
   dessinerReglages();
 }
 
@@ -362,7 +366,7 @@ function dessinerReglages() {
     );
   }
 
-  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, familles, pieces, ...sectionsRecettes()));
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, familles, pieces, ...sectionsRecettes(), sectionCorrespondances()));
 }
 
 function lignePieceReglage(p) {
@@ -933,8 +937,252 @@ function dessinerObjectifs() {
   ));
 }
 
+// ───────────── Questions ─────────────
+const ORDRE_QUESTIONS = { vente_impossible: 0, remboursement: 1, etape_depasse_stock: 2, nom_inconnu: 3, especes_a_saisir: 4 };
+
+async function compterQuestions() {
+  try { etat.nbQuestions = (await api("/questions")).length; } catch { etat.nbQuestions = null; }
+  dessinerMenu();
+}
+
+async function pageQuestions() {
+  [etat.questions, etat.stock, etat.import] = await Promise.all([api("/questions"), api("/stock"), api("/import")]);
+  etat.nbQuestions = etat.questions.length;
+  dessinerMenu();
+  dessinerQuestions();
+}
+
+function texteImport(im) {
+  if (!im.maj_le) return "Aucun import pour l'instant.";
+  const quand = new Date(im.maj_le).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" });
+  const r = im.resultat ?? {};
+  let t = `${im.ventes} vente(s) importée(s). Dernier passage : ${quand}`;
+  if (r.erreur) t += ` · problème : ${r.erreur}`;
+  else if (!im.a_jour) t += " · rattrapage de l'historique en cours (environ 40 ventes par passage, toutes les 15 minutes)";
+  else t += " · à jour";
+  return t;
+}
+
+function boutonImport() {
+  return h("button", { class: "btn", onclick: (e) => tenter(async () => {
+    e.target.disabled = true; e.target.textContent = "Import en cours…";
+    try {
+      const r = await api("/import", { method: "POST" });
+      flash(r.erreur ? "Import interrompu : " + r.erreur : `${r.nouvelles} nouvelle(s) vente(s) importée(s)${r.a_jour ? "." : " ; il en reste, relancez ou attendez le prochain passage automatique."}`, !!r.erreur);
+    } finally { await pageQuestions(); }
+  }) }, "Importer les ventes maintenant");
+}
+
+function dessinerQuestions() {
+  entete("Questions", boutonImport());
+  const page = document.getElementById("page");
+  const autres = etat.questions.filter((q) => q.type !== "nom_inconnu")
+    .sort((a, b) => (ORDRE_QUESTIONS[a.type] ?? 9) - (ORDRE_QUESTIONS[b.type] ?? 9) || a.id - b.id);
+  // Noms inconnus : une carte par nom, ses variantes (options SumUp) dedans.
+  const groupes = new Map();
+  for (const q of etat.questions.filter((q) => q.type === "nom_inconnu")) {
+    const k = q.detail.nom.trim().toLowerCase();
+    (groupes.get(k) ?? groupes.set(k, []).get(k)).push(q);
+  }
+  etat.selection ??= new Set();
+  for (const id of [...etat.selection]) if (!etat.questions.some((q) => q.id === id)) etat.selection.delete(id);
+  const nbSel = etat.selection.size;
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" },
+    h("div", { class: "note" }, texteImport(etat.import)),
+    autres.map(carteQuestion),
+    groupes.size ? h("p", { class: "note", style: "margin:0" },
+      `${groupes.size} nom(s) de la caisse à relier à vos articles. Une seule fois par nom : les ventes suivantes seront reconnues. ` +
+      "Les articles qui ne sont pas les vôtres (ventes de Lucile, par exemple) : cochez-les puis « Ne pas suivre la sélection ».") : null,
+    [...groupes.values()].map(carteGroupeNom),
+    !autres.length && !groupes.size ? h("div", { class: "carte" }, h("div", { class: "vide" }, "Aucune question en attente.")) : null,
+    nbSel ? h("div", { class: "barre-selection" },
+      h("span", {}, `${nbSel} nom(s) sélectionné(s)`),
+      h("button", { class: "btn-sec", onclick: () => { etat.selection.clear(); dessinerQuestions(); } }, "Tout désélectionner"),
+      h("button", { class: "btn", onclick: () => tenter(async () => {
+        const r = await api("/questions/reponse-groupee", { method: "POST", body: { ids: [...etat.selection], ne_pas_suivre: true } });
+        etat.selection.clear();
+        flash(`${r.noms} nom(s) marqué(s) « Ne pas suivre ».`);
+        await pageQuestions();
+      }) }, "Ne pas suivre la sélection")) : null));
+}
+
+function carteGroupeNom(groupe) {
+  const cle = "g:" + groupe[0].detail.nom.trim().toLowerCase();
+  const b = brouillons.get(cle) ?? brouillons.set(cle, { lignes: [{ piece_id: null, quantite: 1 }], tampons: "0", choisies: new Set(groupe.map((q) => q.id)) }).get(cle);
+  const ids = groupe.map((q) => q.id);
+  const toutesSel = ids.every((id) => etat.selection.has(id));
+  const periode = (d) => d.premier ? (d.premier === d.dernier ? `le ${fmtDate(d.premier)}` : `du ${fmtDate(d.premier)} au ${fmtDate(d.dernier)}`) : "";
+  const vendus = groupe.reduce((t, q) => t + (q.detail.quantite ?? 0), 0);
+  const choisies = () => ids.filter((id) => b.choisies.has(id));
+  const repondre = (corps, msg) => tenter(async () => {
+    const sel = choisies();
+    if (!sel.length) throw new Error("Cochez au moins une variante.");
+    const r = await api("/questions/reponse-groupee", { method: "POST", body: { ids: sel, ...corps } });
+    if (sel.length === ids.length) brouillons.delete(cle);
+    flash(msg(r));
+    await pageQuestions();
+  });
+  const variantes = groupe.length > 1 || groupe[0].detail.description
+    ? h("div", { class: "bloc-editeur" },
+        h("div", { class: "note" }, groupe.length > 1 ? "Variantes vues à la caisse : la réponse s'applique à celles qui sont cochées." : "Option vue à la caisse :"),
+        groupe.map((q) => h("label", { class: "ligne-editeur" },
+          groupe.length > 1 ? h("input", { type: "checkbox", checked: b.choisies.has(q.id), onchange: (e) => { e.target.checked ? b.choisies.add(q.id) : b.choisies.delete(q.id); } }) : null,
+          h("span", {}, h("strong", {}, q.detail.description || "(sans option)"),
+            h("span", { class: "note" }, ` · ${q.detail.quantite} vendu(s) ${periode(q.detail)}${q.detail.prix ? ` · ${q.detail.prix} €` : ""}`)))))
+    : null;
+  return h("section", { class: "carte" + (toutesSel ? " selectionnee" : "") },
+    h("div", { class: "tete-article" },
+      h("h2", { style: "padding:0" }, `SumUp vend « ${groupe[0].detail.nom} »`),
+      h("label", { class: "ligne-editeur note" }, h("input", { type: "checkbox", checked: toutesSel, onchange: (e) => {
+        ids.forEach((id) => (e.target.checked ? etat.selection.add(id) : etat.selection.delete(id)));
+        dessinerQuestions();
+      } }), "sélectionner")),
+    h("div", { class: "editeur", style: "border-top:0;padding-top:0" },
+      groupe.length === 1 && !groupe[0].detail.description
+        ? h("div", { class: "note" }, `${vendus} vendu(s) ${periode(groupe[0].detail)}${groupe[0].detail.prix ? ` · ${groupe[0].detail.prix} €` : ""}.`) : null,
+      variantes,
+      h("div", {}, "Quel article est-ce ? Une vente retirera ces pièces du stock :"),
+      lignesPieces(b.lignes, "Pièce retirée du stock"),
+      h("label", { class: "ligne-editeur" }, "Compte pour",
+        h("input", { type: "number", min: "0", step: "1", class: "compte", value: b.tampons, oninput: (e) => { b.tampons = e.target.value; } }),
+        h("span", { class: "note" }, "tampon(s) dans le contrôle des tampons (0 si ce n'est pas un tampon ; lot = 4, collection = 20)")),
+      h("div", { class: "note", style: "font-size:13px" }, "Article absent de la liste ? Créez-le d'abord dans ", h("a", { href: "#reglages" }, "Réglages"), "."),
+      h("div", { class: "barre-comptage" },
+        h("button", { class: "btn-sec", onclick: () => repondre({ ne_pas_suivre: true }, (r) => `${r.noms} nom(s) marqué(s) « Ne pas suivre ».`) }, "Ne pas suivre"),
+        h("button", { class: "btn", onclick: () => {
+          if (b.lignes.some((l) => !l.piece_id)) return flash("Choisissez une pièce sur chaque ligne.", true);
+          repondre({ pieces: b.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })), equivalent_tampons: Number(b.tampons || 0) },
+            (r) => `Enregistré pour ${r.noms} nom(s). ${r.ventes_appliquees} vente(s) retirée(s) du stock ; les ventes antérieures au début du suivi d'une pièce ne servent qu'aux statistiques.`);
+        } }, "Enregistrer"))));
+}
+
+function lignesPieces(etatLignes, label) {
+  return h("div", { class: "bloc-editeur" },
+    etatLignes.map((l, i) => h("div", { class: "ligne-editeur" },
+      selectPiece(l.piece_id, (v) => { l.piece_id = v; }, label),
+      h("span", { class: "note" }, "×"),
+      h("input", { type: "number", min: "1", step: "1", class: "compte", value: String(l.quantite), "aria-label": "Quantité", oninput: (e) => { l.quantite = e.target.value; } }),
+      etatLignes.length > 1 ? h("button", { type: "button", class: "btn-petit", onclick: () => { etatLignes.splice(i, 1); dessinerQuestions(); } }, "Retirer") : null)),
+    h("button", { type: "button", class: "btn-petit", onclick: () => { etatLignes.push({ piece_id: null, quantite: 1 }); dessinerQuestions(); } }, "+ une autre pièce"));
+}
+
+const brouillons = new Map(); // id question → saisie en cours (survit au redessin)
+
+function carteQuestion(q) {
+  const d = q.detail;
+  const repondre = (corps, message) => tenter(async () => {
+    const r = await api(`/questions/${q.id}/reponse`, { method: "POST", body: corps });
+    brouillons.delete(q.id);
+    flash(message(r));
+    await pageQuestions();
+  });
+
+  if (q.type === "vente_impossible") {
+    const input = h("input", { type: "number", min: "0", step: "1", class: "compte", placeholder: "ex. 4", "aria-label": "Nombre réel" });
+    return h("section", { class: "question" },
+      h("strong", {}, "Vente alors qu'il n'en restait plus"),
+      h("div", {}, `SumUp a vendu ${d.vendus} ${q.piece} alors qu'il n'en restait ${d.stock_avant ? "que " + d.stock_avant : "plus"} selon l'outil. Vous en avez sûrement fabriqué sans le noter. Combien en aviez-vous vraiment avant ces ventes ?`),
+      h("div", { class: "ligne-editeur" }, input,
+        h("button", { class: "btn", onclick: () => {
+          if (input.value === "") return flash("Indiquez un nombre.", true);
+          repondre({ compte: Number(input.value) }, (r) => `C'est corrigé : il en reste ${r.stock}.`);
+        } }, "Valider")));
+  }
+
+  if (q.type === "nom_inconnu") {
+    const b = brouillons.get(q.id) ?? brouillons.set(q.id, { lignes: [{ piece_id: null, quantite: 1 }], tampons: "0" }).get(q.id);
+    const nom = d.description ? `${d.nom} · ${d.description}` : d.nom;
+    const periode = d.premier ? (d.premier === d.dernier ? `le ${fmtDate(d.premier)}` : `du ${fmtDate(d.premier)} au ${fmtDate(d.dernier)}`) : "";
+    return h("section", { class: "carte" },
+      h("h2", {}, `SumUp vend « ${nom} »`),
+      h("div", { class: "editeur", style: "border-top:0" },
+        h("div", { class: "note" }, `${d.quantite ?? 0} vendu(s) en ${d.ventes ?? 0} vente(s) ${periode}${d.prix ? ` · ${d.prix} €` : ""}. Quel article est-ce ? Une vente retirera ces pièces du stock.`),
+        lignesPieces(b.lignes, "Pièce retirée du stock"),
+        h("label", { class: "ligne-editeur" }, "Compte pour",
+          h("input", { type: "number", min: "0", step: "1", class: "compte", value: b.tampons, oninput: (e) => { b.tampons = e.target.value; } }),
+          h("span", { class: "note" }, "tampon(s) dans le contrôle des tampons (0 si ce n'est pas un tampon ; lot = 4, collection = 20)")),
+        h("div", { class: "note", style: "font-size:13px" }, "Article absent de la liste ? Créez-le d'abord dans ", h("a", { href: "#reglages" }, "Réglages"), "."),
+        h("div", { class: "barre-comptage" },
+          h("button", { class: "btn-sec", onclick: () => repondre({ ne_pas_suivre: true }, () => "Noté : ce nom ne sera pas suivi.") }, "Ne pas suivre"),
+          h("button", { class: "btn", onclick: () => {
+            if (b.lignes.some((l) => !l.piece_id)) return flash("Choisissez une pièce sur chaque ligne.", true);
+            repondre({ pieces: b.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })), equivalent_tampons: Number(b.tampons || 0) },
+              (r) => `Enregistré. ${r.ventes_appliquees} vente(s) récente(s) retirée(s) du stock (les ventes antérieures au début du suivi d'une pièce ne comptent que pour les statistiques).`);
+          } }, "Enregistrer"))));
+  }
+
+  if (q.type === "remboursement") {
+    const b = brouillons.get(q.id) ?? brouillons.set(q.id, { lignes: [{ piece_id: null, quantite: 1 }] }).get(q.id);
+    const quand = d.date ? new Date(d.date).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" }) : "";
+    return h("section", { class: "carte" },
+      h("h2", {}, `Remboursement de ${d.montant ?? "?"} € ${quand ? "(" + quand + ")" : ""}`),
+      h("div", { class: "editeur", style: "border-top:0" },
+        h("div", { class: "note" }, "L'article est-il revenu en stock ?" + (d.type ? ` (opération SumUp : ${d.type})` : "")),
+        lignesPieces(b.lignes, "Pièce revenue en stock"),
+        h("div", { class: "barre-comptage" },
+          h("button", { class: "btn-sec", onclick: () => repondre({ rien: true }, () => "Noté.") }, "Rien n'est revenu"),
+          h("button", { class: "btn", onclick: () => {
+            if (b.lignes.some((l) => !l.piece_id)) return flash("Choisissez une pièce sur chaque ligne.", true);
+            repondre({ pieces: b.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })) }, () => "Remis en stock.");
+          } }, "Remettre en stock"))));
+  }
+  return h("section", { class: "carte" }, h("div", { class: "vide" }, "Question : " + q.type));
+}
+
+// ───────────── Noms SumUp (Réglages) ─────────────
+function sectionCorrespondances() {
+  const liste = etat.correspondances ?? [];
+  if (!liste.length) return null;
+  const ed = etat.corrEdition;
+  return h("section", { class: "carte" },
+    h("h2", {}, "Noms SumUp"),
+    h("p", { class: "note", style: "margin:0;padding:0 14px 8px;font-size:13px" }, "Ce que chaque nom de la caisse retire du stock. Modifier une ligne réapplique toutes ses ventes."),
+    h("table", { class: "tbl" },
+      h("thead", {}, h("tr", {}, ["Nom à la caisse", "Retire du stock", "Tampons", "Vendus", ""].map((t, i) => h("th", { class: i >= 2 && i <= 3 ? "num" : null }, t)))),
+      h("tbody", {}, liste.map((c) => ed && ed.cle === c.cle
+        ? h("tr", {}, h("td", { colspan: "5" }, h("div", { class: "editeur", style: "border-top:0" },
+            h("strong", {}, c.nom_affiche),
+            lignesPiecesReglages(ed.lignes),
+            h("label", { class: "ligne-editeur" }, "Compte pour",
+              h("input", { type: "number", min: "0", step: "1", class: "compte", value: ed.tampons, oninput: (e) => { ed.tampons = e.target.value; } }), "tampon(s)"),
+            h("div", { class: "barre-comptage" },
+              h("button", { class: "btn-sec", onclick: () => { etat.corrEdition = null; dessinerReglages(); } }, "Annuler"),
+              h("button", { class: "btn-sec", onclick: () => sauverCorrespondance({ cle: c.cle, ne_pas_suivre: true }) }, "Ne pas suivre"),
+              h("button", { class: "btn", onclick: () => {
+                if (ed.lignes.some((l) => !l.piece_id)) return flash("Choisissez une pièce sur chaque ligne.", true);
+                sauverCorrespondance({ cle: c.cle, pieces: ed.lignes.map((l) => ({ piece_id: l.piece_id, quantite: Number(l.quantite) })), equivalent_tampons: Number(ed.tampons || 0) });
+              } }, "Enregistrer")))))
+        : h("tr", {},
+            h("td", { style: "font-weight:600" }, c.nom_affiche),
+            h("td", {}, c.ne_pas_suivre ? h("span", { class: "note" }, "non suivi") : c.pieces.map((p) => `${p.quantite > 1 ? p.quantite + " × " : ""}${p.nom}`).join(" + ")),
+            h("td", { class: "num" }, c.equivalent_tampons || ""),
+            h("td", { class: "num" }, c.vendus),
+            h("td", {}, h("div", { class: "actions-ligne" }, h("button", { class: "btn-petit", disabled: !!ed, onclick: () => {
+              etat.corrEdition = { cle: c.cle, tampons: String(c.equivalent_tampons), lignes: c.pieces.length ? c.pieces.map((p) => ({ piece_id: p.piece_id, quantite: p.quantite })) : [{ piece_id: null, quantite: 1 }] };
+              dessinerReglages();
+            } }, "Modifier"))))))));
+}
+
+function lignesPiecesReglages(lignes) {
+  return h("div", { class: "bloc-editeur" },
+    lignes.map((l, i) => h("div", { class: "ligne-editeur" },
+      selectPiece(l.piece_id, (v) => { l.piece_id = v; }, "Pièce"), h("span", { class: "note" }, "×"),
+      h("input", { type: "number", min: "1", step: "1", class: "compte", value: String(l.quantite), oninput: (e) => { l.quantite = e.target.value; } }),
+      lignes.length > 1 ? h("button", { type: "button", class: "btn-petit", onclick: () => { lignes.splice(i, 1); dessinerReglages(); } }, "Retirer") : null)),
+    h("button", { type: "button", class: "btn-petit", onclick: () => { lignes.push({ piece_id: null, quantite: 1 }); dessinerReglages(); } }, "+ une autre pièce"));
+}
+
+function sauverCorrespondance(corps) {
+  tenter(async () => {
+    const r = await api("/correspondances", { method: "PUT", body: corps });
+    etat.corrEdition = null;
+    flash(`Enregistré : ${r.ventes_appliquees} vente(s) réappliquée(s) au stock.`);
+    await pageReglages();
+  });
+}
+
 window.addEventListener("hashchange", () => {
-  Object.assign(etat, { comptage: null, ligneEnCours: null, edition: null, editeur: null, fait: null, salonEdition: null, comptageAvant: null });
+  Object.assign(etat, { corrEdition: null, comptage: null, ligneEnCours: null, edition: null, editeur: null, fait: null, salonEdition: null, comptageAvant: null });
   afficher();
 });
 afficher();

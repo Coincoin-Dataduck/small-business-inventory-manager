@@ -146,7 +146,8 @@ CREATE TABLE vente (
   id               INTEGER PRIMARY KEY,
   sumup_id         TEXT NOT NULL UNIQUE,
   transaction_code TEXT,
-  date             TEXT NOT NULL,
+  date             TEXT NOT NULL,        -- horodatage SumUp (UTC)
+  jour             TEXT NOT NULL,        -- jour local (Europe/Paris), AAAA-MM-JJ
   montant          REAL NOT NULL,
   salon_id         INTEGER REFERENCES salon(id),
   salon_force      INTEGER NOT NULL DEFAULT 0   -- 1 = salon choisi à la main
@@ -179,9 +180,11 @@ CREATE TABLE correspondance_piece (
 
 CREATE TABLE import_etat (
   id           INTEGER PRIMARY KEY CHECK (id = 1),
-  depuis       TEXT,      -- date de la plus ancienne transaction encore à traiter
-  dernier_id   TEXT,
-  maj_le       TEXT
+  depuis       TEXT,      -- début de l'historique lu (oldest_time de SumUp)
+  dernier_id   TEXT,      -- dernière transaction traitée (oldest_ref de SumUp)
+  maj_le       TEXT,      -- dernier passage
+  resultat     TEXT,      -- JSON : bilan du dernier passage
+  a_jour       INTEGER NOT NULL DEFAULT 0   -- 1 = plus rien à rattraper au dernier passage
 );
 
 CREATE TABLE question (
@@ -224,4 +227,5 @@ INSERT INTO reglage (cle, valeur) VALUES
   ('marge', '0.30'),
   ('marge_unique', '1'),
   ('temps_travail', '1'),
-  ('controle_tampons', '1');
+  ('controle_tampons', '1'),
+  ('import_depuis', '2025-12-01');   -- début de l'historique SumUp à importer
