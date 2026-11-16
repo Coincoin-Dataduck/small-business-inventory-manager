@@ -5,6 +5,8 @@
   "compatibility_date": "2026-11-01",
   "workers_dev": true,
   "preview_urls": false,
+  // Cloudflare Access (valeurs publiques) : équipe et audience de l'application.
+  "vars": { "ACCESS_TEAM_DOMAIN": "lecoincoin.cloudflareaccess.com", "ACCESS_AUD": "9050f9829f47e9251d0d5b6a39dc6b0aba5f9996fce74f22276ed9d7c65a4b4b" },
   // Les 3 fichiers de l'interface sont intégrés au Worker (importés comme texte), pas envoyés comme « assets ».
   "rules": [{ "type": "Text", "globs": ["**/public/*.html", "**/public/*.css", "**/public/app.js"], "fallthrough": false }],
   // Import SumUp toutes les 15 minutes (par tranches de ~40 ventes).
