@@ -17,7 +17,7 @@ export function cleSumUp(nom: string, description?: string | null) {
 
 const jourParis = (iso: string) => new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(new Date(iso));
 
-type Produit = { name?: string; description?: string; quantity?: number; price?: number };
+type Produit = { name?: string; description?: string; quantity?: number; price?: number; price_with_vat?: number };
 type Item = { id: string; transaction_code?: string; type?: string; status?: string; amount?: number; refunded_amount?: number; timestamp: string; product_summary?: string };
 
 async function questionUnique(db: D1Database, type: string, cleDetail: string, valeur: string, detail: Record<string, unknown>, piece_id: number | null = null) {
@@ -118,7 +118,7 @@ async function enregistrerVente(db: D1Database, item: Item, produits: Produit[])
     const cle = cleSumUp(nom, description);
     cles.set(cle, { nom, description });
     return db.prepare("INSERT INTO vente_ligne (vente_id, nom, description, cle, quantite, prix) VALUES (?, ?, ?, ?, ?, ?)")
-      .bind(v.id, nom, description, cle, Math.max(1, Math.round(p.quantity ?? 1)), p.price ?? null);
+      .bind(v.id, nom, description, cle, Math.max(1, Math.round(p.quantity ?? 1)), p.price_with_vat ?? p.price ?? null); // prix TTC (SumUp donne « price » hors TVA)
   }));
 
   for (const [cle, x] of cles) {

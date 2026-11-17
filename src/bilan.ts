@@ -194,7 +194,22 @@ bilan.get("/salons/:id/bilan", async (c) => {
   const st = stats.get(id);
   if (!st) erreur("Salon introuvable.", 404);
   const { results: esp } = await db.prepare("SELECT cle, quantite FROM vente_especes WHERE salon_id = ?").bind(id).all<{ cle: string; quantite: number }>();
-  const { results: noms } = await db.prepare("SELECT cle, nom_affiche FROM correspondance WHERE ne_pas_suivre = 0 ORDER BY nom_affiche").all<{ cle: string; nom_affiche: string }>();
+  const [nomsR, compR, prixR] = await db.batch([
+    db.prepare("SELECT cle, nom_affiche FROM correspondance WHERE ne_pas_suivre = 0 ORDER BY nom_affiche"),
+    db.prepare(`SELECT cp.cle, 'p' || cp.piece_id || 'x' || cp.quantite AS bout, p.nom FROM correspondance_piece cp JOIN piece p ON p.id = cp.piece_id
+                UNION ALL SELECT cf.cle, 'f' || cf.famille_id || 'x' || cf.quantite, f.nom FROM correspondance_famille cf JOIN famille f ON f.id = cf.famille_id`),
+    db.prepare("SELECT cle, prix, COUNT(*) AS n FROM vente_ligne WHERE prix IS NOT NULL GROUP BY cle, prix"),
+  ]);
+  const noms = nomsR.results as { cle: string; nom_affiche: string }[];
+  // Composition (ce que le nom de caisse retire du stock) : sert à regrouper les noms qui désignent la même chose.
+  const compo = new Map<string, { bouts: string[]; noms: string[] }>();
+  for (const x of compR.results as { cle: string; bout: string; nom: string }[]) {
+    const e = compo.get(x.cle) ?? compo.set(x.cle, { bouts: [], noms: [] }).get(x.cle)!;
+    e.bouts.push(x.bout); e.noms.push(x.nom + (x.bout.endsWith("x1") ? "" : " × " + x.bout.split("x")[1]));
+  }
+  // Prix habituel : le plus fréquent (les remises SumUp réparties sur un panier donnent des prix à virgule).
+  const prixHabituel = new Map<string, { prix: number; n: number }[]>();
+  for (const x of prixR.results as { cle: string; prix: number; n: number }[]) (prixHabituel.get(x.cle) ?? prixHabituel.set(x.cle, []).get(x.cle)!).push({ prix: x.prix, n: x.n });
   const especes = new Map(esp.map((e) => [e.cle, e.quantite]));
   const articles = [...st.vendus].map(([pid, v]) => {
     const p = pieces.get(pid)!;
@@ -207,7 +222,8 @@ bilan.get("/salons/:id/bilan", async (c) => {
   return c.json({
     salon: st.salon, jours: st.jours, carte_suivi: st.carte_suivi, especes_montant: st.especes_montant,
     tampons: st.tampons, noms_a_relier: st.noms_a_relier, articles,
-    caisse: noms.map((n) => ({ ...n, especes: especes.get(n.cle) ?? 0, tampons: corr.get(n.cle) ? tamponsPar(corr.get(n.cle)!) : 0 })),
+    caisse: noms.map((n) => ({ ...n, especes: especes.get(n.cle) ?? 0, tampons: corr.get(n.cle) ? tamponsPar(corr.get(n.cle)!) : 0,
+      signature: (compo.get(n.cle)?.bouts ?? []).sort().join("+"), contenu: compo.get(n.cle)?.noms ?? [], prix: prixHabituel.get(n.cle) ?? [] })),
   });
 });
 
@@ -262,24 +278,30 @@ bilan.get("/salons/:id/caisse", async (c) => {
     db.prepare("SELECT piece_id, quantite, motif, date FROM mouvement WHERE motif <> 'comptage' AND date >= ?").bind(s.date_debut + "T00:00:00Z"),
     db.prepare("SELECT p.id, p.nom, p.famille_id, f.nom AS famille, f.modele_non_precise FROM piece p JOIN famille f ON f.id = p.famille_id WHERE p.niveau = 'a_vendre'"),
     // Prix d'un article : noms de caisse qui désignent cet article seul, à l'unité.
-    db.prepare(`SELECT cp.piece_id, AVG(vl.prix) AS prix FROM correspondance_piece cp JOIN vente_ligne vl ON vl.cle = cp.cle
+    db.prepare(`SELECT cp.piece_id, vl.prix, COUNT(*) AS n FROM correspondance_piece cp JOIN vente_ligne vl ON vl.cle = cp.cle
       WHERE cp.quantite = 1 AND vl.prix IS NOT NULL
         AND (SELECT COUNT(*) FROM correspondance_piece x WHERE x.cle = cp.cle) = 1
         AND NOT EXISTS (SELECT 1 FROM correspondance_famille y WHERE y.cle = cp.cle)
-      GROUP BY cp.piece_id`),
+      GROUP BY cp.piece_id, vl.prix`),
     // Prix d'un modèle non précisé à la caisse (ex. « Tampon unité ») : nom de caisse relié à la famille seule, × 1.
-    db.prepare(`SELECT cf.famille_id, AVG(vl.prix) AS prix FROM correspondance_famille cf JOIN vente_ligne vl ON vl.cle = cf.cle
+    db.prepare(`SELECT cf.famille_id, vl.prix, COUNT(*) AS n FROM correspondance_famille cf JOIN vente_ligne vl ON vl.cle = cf.cle
       WHERE cf.quantite = 1 AND vl.prix IS NOT NULL
         AND (SELECT COUNT(*) FROM correspondance_famille x WHERE x.cle = cf.cle) = 1
         AND NOT EXISTS (SELECT 1 FROM correspondance_piece y WHERE y.cle = cf.cle)
-      GROUP BY cf.famille_id`),
+      GROUP BY cf.famille_id, vl.prix`),
     db.prepare("SELECT ve.cle, ve.quantite, c.nom_affiche FROM vente_especes ve JOIN correspondance c ON c.cle = ve.cle WHERE ve.salon_id = ?").bind(id),
-    db.prepare("SELECT cle, AVG(prix) AS prix FROM vente_ligne WHERE prix IS NOT NULL GROUP BY cle"),
+    db.prepare("SELECT cle, prix, COUNT(*) AS n FROM vente_ligne WHERE prix IS NOT NULL GROUP BY cle, prix"),
     db.prepare("SELECT valeur FROM reglage WHERE cle = 'fond_caisse'"),
   ]);
   const pieces = new Map((pR.results as { id: number; nom: string; famille_id: number; famille: string; modele_non_precise: number }[]).map((p) => [p.id, p]));
-  const prixPiece = new Map((prixPieceR.results as { piece_id: number; prix: number }[]).map((x) => [x.piece_id, x.prix]));
-  const prixFam = new Map((prixFamR.results as { famille_id: number; prix: number }[]).map((x) => [x.famille_id, x.prix]));
+  // Prix le plus fréquent (à égalité : le plus élevé, c'est-à-dire sans remise).
+  const plusFrequent = <K>(rows: { k: K; prix: number; n: number }[]) => {
+    const m = new Map<K, { prix: number; n: number }>();
+    for (const r of rows) { const b = m.get(r.k); if (!b || r.n > b.n || (r.n === b.n && r.prix > b.prix)) m.set(r.k, { prix: r.prix, n: r.n }); }
+    return new Map([...m].map(([k, v]) => [k, v.prix]));
+  };
+  const prixPiece = plusFrequent((prixPieceR.results as { piece_id: number; prix: number; n: number }[]).map((x) => ({ k: x.piece_id, prix: x.prix, n: x.n })));
+  const prixFam = plusFrequent((prixFamR.results as { famille_id: number; prix: number; n: number }[]).map((x) => ({ k: x.famille_id, prix: x.prix, n: x.n })));
   const prixDe = (pid: number) => { const p = pieces.get(pid); return prixPiece.get(pid) ?? (p?.modele_non_precise ? prixFam.get(p.famille_id) ?? null : null); };
   const avant = new Map((avR.results as { piece_id: number; compte: number; date: string }[]).map((x) => [x.piece_id, x]));
   const apres = new Map((apR.results as { piece_id: number; compte: number; date: string }[]).map((x) => [x.piece_id, x]));
@@ -300,7 +322,7 @@ bilan.get("/salons/:id/caisse", async (c) => {
     lignes.push({ piece_id: pid, nom: p.nom, famille: p.famille, avant: av.compte, vendus, autres, apres: ap.compte, sans_trace: sansTrace, prix, valeur: prix === null ? null : Math.round(sansTrace * prix * 100) / 100 });
   }
   lignes.sort((a, b) => b.sans_trace - a.sans_trace || a.nom.localeCompare(b.nom));
-  const prixCle = new Map((prixCleR.results as { cle: string; prix: number }[]).map((x) => [x.cle, x.prix]));
+  const prixCle = plusFrequent((prixCleR.results as { cle: string; prix: number; n: number }[]).map((x) => ({ k: x.cle, prix: x.prix, n: x.n })));
   const esp = (espR.results as { cle: string; quantite: number; nom_affiche: string }[]).map((e) => ({ ...e, prix: prixCle.get(e.cle) ?? null }));
   const manquants = lignes.filter((l) => l.sans_trace > 0);
   const somme = (xs: (number | null)[]) => Math.round(xs.reduce<number>((t, x) => t + (x ?? 0), 0) * 100) / 100;

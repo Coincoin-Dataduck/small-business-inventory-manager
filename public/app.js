@@ -2180,17 +2180,27 @@ const euros = (x) => (Math.round(x * 100) / 100).toLocaleString("fr-FR", { style
 
 async function pageBilan(id) {
   [etat.bilan, etat.caisse] = await Promise.all([api(`/salons/${id}/bilan`), api(`/salons/${id}/caisse`)]);
-  // Une case par nom de caisse et nombre de couleurs (encreurs) ; la couleur elle-même ne compte pas.
+  // Une ligne par chose vendue : les noms de caisse qui retirent exactement la même chose du stock sont regroupés
+  // (anciens noms SumUp, « Édition 2025 », couleurs d'encreur…), au nom de l'article quand il n'y en a qu'un.
   const groupes = new Map();
   for (const c of etat.bilan.caisse) {
-    const [base, option] = c.nom_affiche.split(" · ");
-    const n = nbCouleurs(option);
-    const nom = base + texteCouleurs(n);
-    const g = groupes.get(nom) ?? groupes.set(nom, { nom, cle: c.cle, tampons: c.tampons, especes: 0 }).get(nom);
-    g.especes += c.especes;
+    const k = c.signature || "cle:" + c.cle;
+    const g = groupes.get(k) ?? groupes.set(k, { membres: [], especes: 0, tampons: c.tampons, contenu: c.contenu }).get(k);
+    g.membres.push(c); g.especes += c.especes;
   }
-  etat.bilan.groupes = [...groupes.values()];
-  etat.bilanEspeces = { montant: etat.bilan.especes_montant ?? "", q: Object.fromEntries(etat.bilan.groupes.filter((g) => g.especes).map((g) => [g.cle, String(g.especes)])), filtre: "" };
+  etat.bilan.groupes = [...groupes.values()].map((g) => {
+    const ventes = (c) => c.prix.reduce((t, x) => t + x.n, 0);
+    const principal = [...g.membres].sort((a, b) => ventes(b) - ventes(a))[0];
+    const [base, option] = principal.nom_affiche.split(" · ");
+    const nom = g.contenu.length === 1 && !g.contenu[0].includes("×") && g.membres.every((m) => m.signature.startsWith("p"))
+      ? g.contenu[0] : base + texteCouleurs(nbCouleurs(option));
+    const parPrix = new Map();
+    for (const m of g.membres) for (const x of m.prix) parPrix.set(x.prix, (parPrix.get(x.prix) ?? 0) + x.n);
+    const prix = [...parPrix].sort((a, b) => b[1] - a[1] || b[0] - a[0])[0]?.[0] ?? null;
+    return { nom, cle: principal.cle, tampons: g.tampons, especes: g.especes, prix, relie: g.contenu.length > 0,
+      recherche: sansAccent([nom, ...g.membres.map((m) => m.nom_affiche), ...g.contenu].join(" ")) };
+  }).sort((a, b) => a.nom.localeCompare(b.nom, "fr"));
+  etat.bilanEspeces = { q: Object.fromEntries(etat.bilan.groupes.filter((g) => g.especes).map((g) => [g.cle, String(g.especes)])), filtre: "", saisis: false };
   dessinerBilan();
 }
 
@@ -2203,7 +2213,7 @@ function dessinerBilan() {
   const autres = d.jours.reduce((t, j) => t + j.autres, 0), aRelier = d.jours.reduce((t, j) => t + j.a_relier, 0);
   const tuiles = h("div", { class: "tuiles" },
     tuile("Ventes carte", euros(d.carte_suivi), d.jours.map((j) => `${euros(j.suivi)} le ${fmtDate(j.jour)}`).join(" · ") || "aucune"),
-    tuile("Espèces", d.especes_montant === null ? "à saisir" : euros(d.especes_montant), "absent de SumUp, à recopier ci-dessous"),
+    tuile("Espèces notées", etat.caisse ? euros(etat.caisse.especes_notees.total) : "—", "recopiées du cahier, ci-dessous"),
     tuile("Tampons (thermomètre)", String(d.tampons.total), d.tampons.pour_1000 === null ? "fréquentation inconnue" : `${String(d.tampons.pour_1000).replace(".", ",")} pour 1 000 visiteurs` + (d.tampons.especes ? ` · dont ${d.tampons.especes} en espèces` : "")),
     tuile("Fréquentation", d.salon.frequentation ? "~" + d.salon.frequentation.toLocaleString("fr-FR") : "?", [d.salon.type, `${d.salon.nb_jours} jour(s)`].filter(Boolean).join(" · ")));
 
@@ -2225,22 +2235,36 @@ function dessinerBilan() {
         }) }, a.mal_expose ? "Oui · ne compte pas" : "Non")))))) : h("div", { class: "vide" }, "Aucune vente d'article reliée pour ce salon."),
     h("p", { class: "note", style: "margin:0;padding:8px 14px 14px;font-size:13px" }, "Les articles marqués « ne compte pas » sont écartés des recommandations des prochains salons (mal mis en avant, ou épuisés en cours de salon)."));
 
-  const filtre = e.filtre.trim().toLowerCase();
-  const lignesCaisse = d.groupes.filter((c) => !filtre || c.nom.toLowerCase().includes(filtre) || e.q[c.cle]);
-  const especes = h("section", { class: "carte" }, h("h2", {}, "Espèces (table manuscrite)"),
+  // Espèces : une ligne par chose vendue, recherche souple, total en direct, enregistrement par le bouton.
+  const mots = sansAccent(e.filtre.trim()).split(/\s+/).filter(Boolean);
+  const visibles = d.groupes.filter((g) => (!e.saisis || Number(e.q[g.cle]) > 0) && mots.every((m) => g.recherche.includes(m)));
+  const totalEl = h("strong", {}), nbEl = h("span", { class: "note" });
+  const majTotal = () => {
+    let t = 0, n = 0, inconnus = 0;
+    for (const g of d.groupes) { const q = Number(e.q[g.cle]) || 0; if (!q) continue; n += q; if (g.prix === null) inconnus++; else t += q * g.prix; }
+    totalEl.textContent = euros(t);
+    nbEl.textContent = `${n} article(s) vendu(s) en espèces` + (inconnus ? ` · ${inconnus} sans prix connu, pas compté(s)` : "");
+  };
+  majTotal();
+  const recherche = h("input", { id: "esp-filtre", type: "search", value: e.filtre, placeholder: "ex. sauge, lot, salamandre a5", autocomplete: "off",
+    oninput: (ev) => { e.filtre = ev.target.value; dessinerBilan(); const el = document.getElementById("esp-filtre"); el.focus(); el.setSelectionRange(el.value.length, el.value.length); } });
+  const especes = h("section", { class: "carte" }, h("h2", {}, "Ventes en espèces (cahier)"),
+    h("p", { class: "note", style: "margin:0;padding:0 14px" }, "Recopiez le cahier : combien de chaque chose vendue en espèces. Les noms de caisse qui désignent la même chose sont regroupés."),
     h("div", { class: "formulaire" },
-      h("label", { for: "esp-montant" }, "Total des espèces (€)", h("input", { id: "esp-montant", type: "number", min: "0", step: "0.01", value: String(e.montant), style: "width:140px", oninput: (ev) => { e.montant = ev.target.value; } })),
-      h("label", { for: "esp-filtre" }, "Chercher un nom de caisse", h("input", { id: "esp-filtre", value: e.filtre, placeholder: "ex. tampon", oninput: (ev) => { e.filtre = ev.target.value; dessinerBilan(); const el = document.getElementById("esp-filtre"); el.focus(); el.setSelectionRange(el.value.length, el.value.length); } }))),
-    h("table", { class: "tbl" }, h("tbody", {}, lignesCaisse.map((c) => h("tr", {},
-      h("td", {}, c.nom, c.tampons ? h("span", { class: "note" }, ` · ${c.tampons} tampon(s)`) : null),
-      h("td", { class: "num", style: "width:120px" }, h("input", { class: "compte", type: "number", min: "0", step: "1", value: e.q[c.cle] ?? "", placeholder: "0", "aria-label": "Vendus en espèces : " + c.nom,
-        oninput: (ev) => { e.q[c.cle] = ev.target.value; } })))))),
+      h("label", { for: "esp-filtre" }, "Chercher", recherche),
+      h("label", { class: "ligne-editeur note" }, h("input", { type: "checkbox", checked: e.saisis, onchange: (ev) => { e.saisis = ev.target.checked; dessinerBilan(); } }), "seulement ce qui est saisi")),
+    h("table", { class: "tbl" }, h("tbody", {}, visibles.length ? visibles.map((g) => h("tr", {},
+      h("td", {}, h("strong", {}, g.nom), g.tampons ? h("span", { class: "note" }, ` · ${g.tampons} tampon(s)`) : null, g.relie ? null : h("span", { class: "note" }, " · pas relié à un article")),
+      h("td", { class: "num note", style: "width:110px", title: g.prix !== null && g.prix % 1 ? "Vendu seulement avec une remise sur le panier : prix réel inconnu" : null },
+        g.prix === null ? "prix ?" : g.prix % 1 ? `≈ ${euros(g.prix)} ?` : euros(g.prix)),
+      h("td", { class: "num", style: "width:110px" }, h("input", { class: "compte", type: "number", min: "0", step: "1", value: e.q[g.cle] ?? "", placeholder: "0", "aria-label": "Vendus en espèces : " + g.nom,
+        oninput: (ev) => { e.q[g.cle] = ev.target.value; majTotal(); } })))) : h("tr", {}, h("td", { class: "note" }, "Rien ne correspond.")))),
     h("div", { class: "barre-comptage", style: "padding:14px" },
-      h("span", { class: "note" }, "Les quantités en espèces retirent les articles du stock, comme les ventes carte."),
+      h("div", { class: "total-caisse", style: "padding:0;flex:1" }, h("span", { class: "note" }, "Total espèces notées"), totalEl, nbEl),
       h("button", { class: "btn", onclick: () => tenter(async () => {
         const lignes = Object.entries(e.q).filter(([, v]) => v !== "" && Number(v) > 0).map(([cle, v]) => ({ cle, quantite: Number(v) }));
         if (lignes.some((l) => !Number.isInteger(l.quantite))) throw new Error("Les quantités doivent être des nombres entiers.");
-        const r = await api(`/salons/${d.salon.id}/especes`, { method: "PUT", body: { montant: e.montant === "" ? null : Number(e.montant), lignes } });
+        const r = await api(`/salons/${d.salon.id}/especes`, { method: "PUT", body: { montant: d.especes_montant, lignes } });
         flash(`Espèces enregistrées (${lignes.length} ligne(s), ${r.appliquees} retrait(s) de stock).`);
         await pageBilan(d.salon.id);
       }) }, "Enregistrer les espèces")));
