@@ -35,45 +35,60 @@ const ppcm = (a: number, b: number) => (a / pgcd(a, b)) * b;
 
 /** Régénère les étapes concrètes à partir des recettes (à appeler après toute modification du catalogue ou des recettes). */
 export async function materialiser(db: D1Database) {
-  const [recettes, [pR, eR, fR]] = await Promise.all([
+  const [recettes, [pR, eR, fR, famR]] = await Promise.all([
     lireRecettes(db),
     db.batch([
       db.prepare("SELECT id, nom, famille_id, niveau, produit_id, variante, retire FROM piece"),
       db.prepare("SELECT id, recette_etape_id, pour_piece_id FROM etape WHERE recette_etape_id IS NOT NULL"),
       db.prepare("SELECT DISTINCT etape_id FROM etape_faite"),
+      db.prepare("SELECT id, variantes FROM famille"),
     ]),
   ]);
   const pieces = (pR.results as PieceMin[]).filter((p) => !p.retire);
   const parId = new Map(pieces.map((p) => [p.id, p]));
   const existantes = new Map((eR.results as { id: number; recette_etape_id: number; pour_piece_id: number }[]).map((e) => [`${e.recette_etape_id}:${e.pour_piece_id}`, e.id]));
   const faites = new Set((fR.results as { etape_id: number }[]).map((x) => x.etape_id));
+  const variantesFamille = new Map((famR.results as { id: number; variantes: string | null }[]).map((f) => {
+    try { return [f.id, new Set<string>(f.variantes ? JSON.parse(f.variantes) : [])]; } catch { return [f.id, new Set<string>()]; }
+  }));
 
   const stmts: D1PreparedStatement[] = [];
   const vues = new Set<string>();
   for (const r of recettes) {
     // Une étape de produit qui ne cite aucune « même variante » (ex. Graver : feuille → gommes) ne se fait qu'une fois.
     const parVariante = r.lignes.some((l) => l.produit_id !== null);
-    const cibles: { id: number; variante: string | null }[] = r.commune || (r.produit_id && !parVariante) ? [{ id: 0, variante: null }]
+    // Recette commune : soit une étape « une feuille → plusieurs formats » (formats), soit une étape faite
+    // format par format (sans formats) : générée pour chaque article à vendre de la famille, selon sa variante.
+    const parFormat = !!r.commune && !r.formats.length;
+    const cibles: { id: number; variante: string | null; nom?: string }[] = parFormat
+      ? pieces.filter((p) => p.famille_id === r.famille_id && p.niveau === "a_vendre" && p.produit_id && p.variante && variantesFamille.get(r.famille_id)?.has(p.variante)).map((p) => ({ id: p.id, variante: p.variante, nom: p.nom }))
+      : r.commune || (r.produit_id && !parVariante) ? [{ id: 0, variante: null }]
       : r.produit_id ? pieces.filter((p) => p.produit_id === r.produit_id).map((p) => ({ id: p.id, variante: p.variante }))
       : r.piece_id && parId.has(r.piece_id) ? [{ id: r.piece_id, variante: null }] : [];
     for (const t of cibles) {
       const resoudre = (l: Ligne) => l.piece_id !== null ? (parId.has(l.piece_id) ? l.piece_id : null)
         : pieces.find((p) => p.produit_id === l.produit_id && p.variante === t.variante)?.id ?? null;
       const utilise = r.lignes.filter((l) => l.sens === "utilise").map((l) => ({ id: resoudre(l), q: l.quantite }));
-      const donne = r.lignes.filter((l) => l.sens === "donne").map((l) => ({ id: resoudre(l), q: l.quantite }));
-      if ([...utilise, ...donne].some((x) => x.id === null)) continue; // une variante sans sa fourniture « même variante » : pas d'étape
+      let donne = r.lignes.filter((l) => l.sens === "donne").map((l) => ({ id: resoudre(l), q: l.quantite }));
+      if (parFormat && !donne.length) donne = [{ id: t.id, q: 1 }]; // on obtient le print lui-même (même format)
+      if ([...utilise, ...(r.commune && !parFormat ? [] : donne)].some((x) => x.id === null)) continue; // une variante sans sa fourniture « même variante » : pas d'étape
       let auChoix: { capacite: number; choix: { id: number; poids: number }[] } | null = null;
       if (r.produit_id && !parVariante && !pieces.some((p) => p.produit_id === r.produit_id)) continue;
-      if (r.commune) {
+      if (r.commune && !parFormat) {
         const q = new Map(r.formats.map((f) => [f.variante, f.quantite]));
-        const choisis = pieces.filter((p) => p.famille_id === r.famille_id && p.niveau === "a_vendre" && p.variante && q.has(p.variante));
+        // Ce qui sort de la feuille : un produit précis (ex. Tirage A3/A4/A5), sinon directement les prints.
+        const de = r.lignes.find((l) => l.sens === "donne" && l.produit_id !== null)?.produit_id ?? null;
+        const choisis = de !== null
+          ? pieces.filter((p) => p.produit_id === de && p.variante && q.has(p.variante))
+          : pieces.filter((p) => p.famille_id === r.famille_id && p.niveau === "a_vendre" && p.variante && q.has(p.variante));
         if (!choisis.length) continue;
         const capacite = [...q.values()].reduce(ppcm, 1);
         auChoix = { capacite, choix: choisis.map((p) => ({ id: p.id, poids: capacite / q.get(p.variante!)! })) };
+        donne = [];
       } else if (!donne.length) continue;
       const cle = `${r.id}:${t.id}`;
       vues.add(cle);
-      const nom = t.variante ? `${r.nom} · ${t.variante}` : r.nom;
+      const nom = t.nom ? `${r.nom} · ${t.nom}` : t.variante ? `${r.nom} · ${t.variante}` : r.nom;
       const ex = existantes.get(cle);
       const ref = ex !== undefined ? String(ex) : "(SELECT MAX(id) FROM etape)";
       if (ex !== undefined) {
@@ -128,12 +143,11 @@ async function lireSaisie(db: D1Database, b: Record<string, unknown>): Promise<S
     const pid = l?.piece_id == null ? null : entier(l.piece_id, "élément", 1);
     const prid = l?.produit_id == null ? null : entier(l.produit_id, "produit", 1);
     if ((pid === null) === (prid === null)) erreur("Chaque ligne désigne un élément, ou un produit « de la même variante ».");
-    if (prid !== null && !produit_id) erreur("« De la même variante » n'a de sens que dans la recette d'un produit à variantes.");
+    if (prid !== null && !produit_id && !commune) erreur("« De la même variante » n'a de sens que dans la recette d'un produit à variantes.");
     return { sens, piece_id: pid, produit_id: prid, quantite: entier(l?.quantite, "quantité", 1) };
   });
   const formats: Format[] = commune ? (Array.isArray(b.formats) ? b.formats : []).map((f: Record<string, unknown>) => ({ variante: texte(f?.variante, "variante"), quantite: entier(f?.quantite, "quantité", 1) })) : [];
-  if (commune && formats.length < 1) erreur("Indiquez combien de chaque variante on obtient en une fois.");
-  if (commune && lignes.some((l) => l.sens === "donne")) erreur("Une recette commune donne au choix les variantes indiquées.");
+  if (commune && formats.length && lignes.some((l) => l.sens === "donne" && l.produit_id === null)) erreur("Une étape « une feuille → plusieurs formats » donne un produit à formats (ex. Tirage), ou directement les prints.");
   if (!commune && !lignes.some((l) => l.sens === "donne")) erreur("Une étape doit donner au moins quelque chose.");
   const ids = lignes.filter((l) => l.piece_id).map((l) => l.piece_id!);
   if (ids.length) {

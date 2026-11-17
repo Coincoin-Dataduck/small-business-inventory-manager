@@ -782,7 +782,11 @@ function proprietaires() {
         items.push({ cle: "p" + p.produit_id, type: "produit", famille: f, produit_id: p.produit_id, nom: p.produit, variantes: vs, niveau: p.niveau, sous: `${vs.length} var.` + (p.niveau === "fait_maison" ? " · maison" : "") });
       } else items.push({ cle: "a" + p.id, type: "piece", famille: f, piece: p, nom: p.nom, niveau: p.niveau, sous: p.niveau === "fait_maison" ? "maison" : "" });
     }
-    return { famille: f, items };
+    // Produits fabriqués par la recette commune (sans recette à eux) : regroupés sous « Tous les … ».
+    const commune = items.find((x) => x.type === "commune");
+    const couverts = commune ? items.filter((x) => x.type !== "commune" && !etapesDe(x).length && (x.type === "produit" ? x.variantes : [x.piece]).every((p) => fabriquePar(p)?.commune)) : [];
+    if (commune && couverts.length) commune.sous = `${couverts.length} produits, formats mélangés`;
+    return { famille: f, items: items.filter((x) => !couverts.includes(x)) };
   }).filter((g) => g.items.length);
 }
 
@@ -798,7 +802,8 @@ const memeLigne = (a, b) => (a.piece_id && a.piece_id === b.piece_id) || (a.prod
 function fabriquePar(p) {
   return etat.recettes.find((r) =>
     r.lignes.some((l) => l.sens === "donne" && (l.piece_id === p.id || (p.produit_id && l.produit_id === p.produit_id)))
-    || (r.commune && r.famille_id === p.famille_id && p.niveau === "a_vendre" && r.formats.some((f) => f.variante === p.variante)));
+    || (r.commune && r.famille_id === p.famille_id && p.niveau === "a_vendre" && !r.lignes.some((l) => l.sens === "donne")
+        && (r.formats.some((f) => f.variante === p.variante) || (!r.formats.length && (etat.stock.find((f) => f.id === p.famille_id)?.variantes ?? []).includes(p.variante)))));
 }
 const estFabrique = (p) => !!fabriquePar(p);
 // Nom de la recette (produit, article ou famille) à laquelle appartient une étape.
@@ -861,7 +866,7 @@ function dessinerRecettes() {
 function versTravail(r) {
   const formats = {};
   for (const f of r.formats) formats[f.variante] = String(f.quantite);
-  return { id: r.id, nom: r.nom, mode: r.mode, temps_min: r.temps_min ?? "", formats,
+  return { id: r.id, nom: r.nom, mode: r.mode, temps_min: r.temps_min ?? "", formats, feuille: r.formats.length > 0,
     utilise: r.lignes.filter((l) => l.sens === "utilise").map((l) => ({ piece_id: l.piece_id, produit_id: l.produit_id, quantite: l.quantite })),
     donne: r.lignes.filter((l) => l.sens === "donne").map((l) => ({ piece_id: l.piece_id, produit_id: l.produit_id, quantite: l.quantite })) };
 }
@@ -869,7 +874,7 @@ const proprioCourant = () => proprietaires().flatMap((g) => g.items).find((x) =>
 function aCompleter(o, e) {
   const manque = [];
   if (!String(e.nom).trim()) manque.push("un nom");
-  if (o.type === "commune" ? !Object.values(e.formats).some((q) => String(q).trim()) : !e.donne.length) manque.push("ce qu'on obtient");
+  if (o.type === "commune" ? e.feuille && !Object.values(e.formats).some((q) => String(q).trim()) : !e.donne.length) manque.push("ce qu'on obtient");
   return manque;
 }
 
@@ -879,7 +884,7 @@ async function sauverEtape(o, e) {
   const lignes = [...e.utilise.map((l) => ({ ...l, sens: "utilise" })), ...e.donne.map((l) => ({ ...l, sens: "donne" }))]
     .map((l) => ({ sens: l.sens, piece_id: l.piece_id ?? null, produit_id: l.produit_id ?? null, quantite: Math.max(1, Number(l.quantite) || 1) }));
   const body = { nom: e.nom, mode: e.mode, temps_min: String(e.temps_min).trim() === "" ? null : Number(String(e.temps_min).replace(",", ".")), lignes,
-    formats: Object.entries(e.formats).filter(([, q]) => String(q).trim() !== "").map(([variante, q]) => ({ variante, quantite: Number(q) })),
+    formats: o.type === "commune" && !e.feuille ? [] : Object.entries(e.formats).filter(([, q]) => String(q).trim() !== "").map(([variante, q]) => ({ variante, quantite: Number(q) })),
     ...(o.type === "commune" ? { commune: true, famille_id: o.famille.id } : o.type === "produit" ? { produit_id: o.produit_id } : { piece_id: o.piece.id }) };
   await tenter(async () => {
     if (e.id) await api("/recettes/" + e.id, { method: "PUT", body });
@@ -898,8 +903,8 @@ async function sauverEtape(o, e) {
 function etabli(o) {
   const etapes = etat.travail.etapes;
   const st = statutRecette(o);
-  const n = (l) => l.map((x) => `${x.quantite} ${nomLigne(x)}`).join(" + ") || "…";
-  const sortieTexte = (e) => (o.type === "commune" ? texteFormats(e.formats) : n(e.donne));
+  const n = (l) => l.map((x) => `${x.quantite} ${nomLigne(x).replace(" · même variante", o.type === "commune" ? " · même format" : o.famille.modele_non_precise ? " · même motif" : " · même variante")}`).join(" + ") || "…";
+  const sortieTexte = (e) => (o.type === "commune" ? (e.feuille ? texteFormats(e.formats) + (e.donne.length ? " de " + n(e.donne) : "") : (e.donne.length ? n(e.donne) : "1 print · même format")) : n(e.donne));
   const vaut = o.type === "produit" ? `vaut pour ${o.variantes.length > 1 ? `les ${o.variantes.length} variantes` : "sa variante"}`
     : o.type === "commune" ? `vaut pour tous les ${o.famille.nom.toLowerCase()}, formats mélangés` : o.niveau === "fait_maison" ? "fourniture maison" : "";
   const fabriqueAilleurs = st === "commune" ? fabriquePar(o.type === "produit" ? o.variantes[0] : o.piece) : null;
@@ -930,11 +935,20 @@ function etabli(o) {
             etapes.splice(i, 1); dessinerRecettes();
           }) }, "×"))),
       h("div", { class: "flux" }, depot(o, e, i, "utilise"), h("span", { class: "fl", "aria-hidden": "true" }, "→"),
-        o.type === "commune" ? depotFormats(o, e) : depot(o, e, i, "donne")),
+        o.type === "commune" && e.feuille ? depotFormats(o, e, i) : depot(o, e, i, "donne")),
       manque.length ? h("div", { class: "a-completer" }, "À compléter : " + manque.join(" et ") + " (rien n'est enregistré avant).") : null);
   });
   const manques = maisonsManquantes(o).map((m) => h("button", { type: "button", class: "et-ajout manque", onclick: () => ajouterEtapeQuiFabrique(o, m) },
     `⚠ « ${m.nom} » est faite maison : + ajouter l'étape qui la fabrique`));
+  const nouvelleCommune = (feuille) => () => {
+    etapes.push({ id: null, nom: "", mode: feuille ? "par_matiere" : "a_la_piece", temps_min: "", utilise: [], donne: [], feuille,
+      formats: Object.fromEntries((o.famille.variantes ?? []).map((v) => [v, ""])) });
+    etat.recetteFocus = `et-nom-${etapes.length - 1}`; dessinerRecettes();
+  };
+  if (o.type === "commune") return h("div", { class: "et-main" }, h("div", { class: "et-bloc" }, tete, ...lignes,
+    h("div", { class: "et-ajouts" },
+      h("button", { type: "button", class: "et-ajout", onclick: nouvelleCommune(true) }, "+ Étape « une feuille → plusieurs formats » (ex. Imprimer)"),
+      h("button", { type: "button", class: "et-ajout", onclick: nouvelleCommune(false) }, "+ Étape faite format par format (ex. Couper, Emballer)"))), ...manques);
   return h("div", { class: "et-main" }, h("div", { class: "et-bloc" }, tete, ...lignes,
     h("button", { type: "button", class: "et-ajout", onclick: () => {
       etapes.push({ id: null, nom: "", mode: "a_la_piece", temps_min: "", utilise: [], formats: Object.fromEntries((o.famille.variantes ?? []).map((v) => [v, ""])),
@@ -968,9 +982,10 @@ function depot(o, e, i, sens) {
     liste.length ? liste.flatMap((l, k) => [k ? h("span", { class: "plus", "aria-hidden": "true" }, "+") : null,
       h("span", { class: "chip" + (l.produit_id ? " var" : "") },
         h("input", { value: String(l.quantite), inputmode: "numeric", "aria-label": `Quantité de ${nomLigne(l)}`, onchange: (ev) => { l.quantite = ev.target.value; sauverEtape(o, e); } }),
-        nomLigne(l).replace(" · même variante", o.type === "produit" && o.famille.modele_non_precise ? " · même motif" : " · même variante"),
+        nomLigne(l).replace(" · même variante", o.type === "commune" ? " · même format" : o.type === "produit" && o.famille.modele_non_precise ? " · même motif" : " · même variante"),
         lien(l) ? h("span", { class: "lk" }, lien(l)) : null,
         h("button", { type: "button", "aria-label": "Retirer " + nomLigne(l), onclick: () => { liste.splice(k, 1); sauverEtape(o, e); } }, "×"))])
+      : o.type === "commune" && sens === "donne" ? h("span", { class: "chip var implicite" }, "1 print · même format")
       : h("span", { class: "vide2" }, etat.ingChoisi ? "touchez ici pour poser l'ingrédient choisi" : "glissez un ingrédient ici"));
   const cv = etat.choixVariante;
   if (cv && cv.i === i && cv.sens === sens) {
@@ -999,13 +1014,20 @@ const texteFormats = (formats) => {
   const ex = exempleMelange(formats);
   return "la place pour " + f.map(([v, q]) => `${q} ${v}`).join(", ou ") + (ex ? ` (mélange possible, ex. ${ex})` : "");
 };
-function depotFormats(o, e) {
+function depotFormats(o, e, i) {
   const ex = exempleMelange(e.formats);
-  return h("div", { class: "depot" },
+  const de = e.donne[0];
+  return h("div", { class: "depot", "data-i": i, "data-sens": "donne",
+    onclick: (ev) => { if (etat.ingChoisi && !ev.target.closest(".chip")) poserIngredient(o, etat.ingChoisi, i, "donne"); } },
     h("span", { class: "lbl" }, "On obtient la place pour"),
     Object.keys(e.formats).flatMap((v, k) => [k ? h("span", { class: "plus" }, "ou") : null,
       h("span", { class: "chip var" }, h("input", { value: e.formats[v], placeholder: "–", inputmode: "numeric", "aria-label": `Combien de ${v} tiennent en une fois`,
         onchange: (ev) => { e.formats[v] = ev.target.value; sauverEtape(o, e); } }), v)]),
+    h("span", { class: "de-quoi" }, "de :",
+      de ? h("span", { class: "chip var" }, nomProduit(de.produit_id) + " · même format",
+             h("button", { type: "button", "aria-label": "Retirer", onclick: () => { e.donne = []; sauverEtape(o, e); } }, "×"))
+         : h("span", { class: "chip var implicite" }, "prints, directement"),
+      h("small", { class: "note" }, de ? "" : " (glissez ici un Tirage A3/A4/A5 s'il y a une étape après)")),
     h("span", { class: "vide2", style: "width:100%" },
       (ex ? `On mélange comme on veut tant que ça tient : par exemple ${ex} sur la même feuille. ` : "On mélange les formats comme on veut tant que ça tient. ")
       + "Vide = ce format ne sort pas de cette étape."));
@@ -1018,9 +1040,14 @@ function poserIngredient(o, ingDepart, i, sens) {
   if (ing.produit_id) {
     const vs = piecesListe().filter((p) => p.produit_id === ing.produit_id);
     // « Même variante » n'a de sens que si les variantes se correspondent (Mini-presse Sauge ↔ Planchette Sauge).
-    const correspond = o.type === "produit" && (ing.produit_id === o.produit_id || vs.some((p) => o.variantes.some((v) => v.variante === p.variante)));
+    const correspond = (o.type === "produit" && (ing.produit_id === o.produit_id || vs.some((p) => o.variantes.some((v) => v.variante === p.variante))))
+      || (o.type === "commune" && vs.some((p) => (o.famille.variantes ?? []).includes(p.variante)));
     if (vs.length === 1) ing = { piece_id: vs[0].id };
     else if (!correspond) { etat.choixVariante = { ing, i, sens }; etat.ingChoisi = null; dessinerRecettes(); return; }
+  }
+  if (o.type === "commune" && e.feuille && sens === "donne") {
+    if (!ing.produit_id) { flash("Ici, on pose un produit qui existe dans les mêmes formats (ex. Tirage A3/A4/A5).", true); dessinerRecettes(); return; }
+    e.donne = [{ produit_id: ing.produit_id, piece_id: null, quantite: 1 }]; etat.ingChoisi = null; sauverEtape(o, e); return;
   }
   const l = e[sens];
   const ex = l.find((x) => memeLigne(x, ing));
@@ -1084,7 +1111,11 @@ function palette(o) {
             await api("/pieces", { method: "POST", body: { nom: texte, famille_id: o.famille.id, niveau: niv, suivi: "quantite" } });
             etat.stock = await api("/stock"); etat.palQ = ""; flash(`« ${texte} » ajouté (${titre.toLowerCase()}).`); dessinerRecettes();
             queueMicrotask(() => document.getElementById("pal-q")?.focus());
-          }) }, titre))))
+          }) }, titre)),
+          o.famille.variantes?.length ? h("button", { type: "button", class: "btn-petit", onclick: () => tenter(async () => {
+            await api("/produits", { method: "POST", body: { nom: texte, famille_id: o.famille.id, niveau: "fait_maison", variantes: o.famille.variantes } });
+            etat.stock = await api("/stock"); etat.palQ = ""; flash(`« ${texte} » ajouté, fait maison, en ${o.famille.variantes.join(", ")}.`); dessinerRecettes();
+          }) }, `Faite maison, en ${o.famille.variantes.join(" / ")}`) : null))
       : null;
     conteneur.replaceChildren(...trouves.map((x) => tuileIng(o, x, x.famille_id !== o.famille.id)), creer,
       !trouves.length && !creer ? h("span", { class: "note" }, "Encore une lettre…") : null);
