@@ -33,6 +33,7 @@ Validée question par question avec Clément (novembre 2026). Les « ? » sont d
   - par une étape qui utilise plus de pièces que le stock (« selon l'outil il ne restait que 3 attaches ; combien en aviez-vous vraiment ? »).
 - **Comment on compte** (validé le 17/11/2026) :
   - deux façons, avec les mêmes filtres (famille, type) : **chercher** (on part de l'objet qu'on a en main : quelques lettres, l'article, la quantité) ou **suivre la liste** ;
+  - **chaque ligne est enregistrée dès qu'on la valide** (Entrée, ✓ ou 0), comme partout ailleurs : rien ne se perd ; ↺ annule la ligne (le chiffre d'avant revient) ; « Terminer le comptage » ferme simplement l'écran (décision du 17/11/2026) ;
   - la case affiche toujours un chiffre (l'attendu, ou ce qui a déjà été compté) : « 12 » remplace, « +5 » / « -2 » ajoute ou retire au chiffre de la case ; Entrée ou ✓ = compté ; bouton « 0 » = compté, il n'y en a pas ;
   - un article absent de la liste se crée depuis le comptage (ou depuis le Stock) ; la quantité tapée est son premier comptage ;
   - ce qui n'est pas compté reste tel quel ; « pas encore compté » = pas de comptage depuis le début de la préparation en cours (lendemain du dernier salon passé ; sans salon passé saisi : aujourd'hui), d'où qu'on ait compté ; visible partout : ligne hachurée vermillon « pas compté depuis <salon> », avancement par famille, filtre « Pas encore comptés » ; on peut compter en plusieurs fois ;

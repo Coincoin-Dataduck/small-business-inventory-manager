@@ -85,7 +85,7 @@ function dessinerMenu() {
         onclick: () => { location.hash = p.id; },
       }, p.label, p.bientot ? h("span", { class: "bientot" }, "bientôt") : null,
         p.id === "questions" && etat.nbQuestions ? h("span", { class: "pastille-nb" }, etat.nbQuestions) : null,
-        p.id === "stock" && (etat.comptage || comptageGarde()) ? h("span", { class: "pastille-nb", title: "Comptage en cours, pas encore enregistré" }, "comptage") : null),
+        p.id === "stock" && (etat.comptage || comptageGarde()) ? h("span", { class: "pastille-nb", title: "Comptage en cours (ce qui est compté est déjà enregistré)" }, "comptage") : null),
     ),
   );
 }
@@ -161,25 +161,44 @@ function lireSaisie(texte, base) {
   throw new Error(`« ${texte} » : tapez un nombre (12), ou +5 / -2 pour ajouter ou retirer.`);
 }
 
-function confirmer(p, valeur) {
+// Chaque ligne comptée est enregistrée tout de suite (comme partout ailleurs) ; ↺ l'annule.
+async function confirmer(p, valeur) {
   const c = etat.comptage;
+  const avant = etat.comptageAvant;
+  const r = await api("/comptages", { method: "POST", body: { lignes: [{ piece_id: p.id, compte: valeur }], ...(avant ? { type: "avant", salon_id: avant.salon_id } : {}) } });
+  const l = r.lignes[0];
+  if (c.attendus[p.id] === undefined) c.attendus[p.id] = l.attendu;
+  (c.lignes[p.id] ||= []).push(l.id);
   c.valeurs[p.id] = valeur;
   c.ordre = [p.id, ...c.ordre.filter((x) => x !== p.id)];
   garderComptage();
+  await rafraichirStock();
 }
-function retirer(p) {
-  delete etat.comptage.valeurs[p.id];
-  etat.comptage.ordre = etat.comptage.ordre.filter((x) => x !== p.id);
+async function retirer(p) {
+  const c = etat.comptage;
+  for (const id of [...(c.lignes[p.id] ?? [])].reverse()) await api("/comptages/lignes/" + id, { method: "DELETE" }).catch(() => {});
+  oublierLigne(p.id);
+  await rafraichirStock();
+  flash(`« ${p.nom ?? "Ligne"} » : comptage annulé, le chiffre d'avant est revenu.`);
+}
+function oublierLigne(id) {
+  const c = etat.comptage;
+  delete c.valeurs[id]; delete c.lignes[id]; delete c.attendus[id];
+  c.ordre = c.ordre.filter((x) => x !== Number(id));
   garderComptage();
+}
+async function rafraichirStock() {
+  const [stock, ce] = await Promise.all([api("/stock"), api("/comptages/etat")]);
+  etat.stock = stock; etat.depuis = ce.depuis; etat.depuisSalon = ce.salon;
 }
 
 // Comptage en cours gardé dans ce navigateur à chaque ligne : rien n'est perdu si la page se recharge
-// ou si l'on change d'écran avant « Enregistrer le comptage ».
+// ou si l'on change d'écran (chaque ligne est déjà enregistrée sur le serveur ; ceci garde la liste « comptés »).
 const CLE_COMPTAGE = "stock-hervine:comptage-en-cours";
 function garderComptage() {
   try {
     if (!etat.comptage || !Object.keys(etat.comptage.valeurs).length) { localStorage.removeItem(CLE_COMPTAGE); return; }
-    localStorage.setItem(CLE_COMPTAGE, JSON.stringify({ valeurs: etat.comptage.valeurs, ordre: etat.comptage.ordre, mode: etat.comptage.mode, avant: etat.comptageAvant, le: new Date().toISOString() }));
+    localStorage.setItem(CLE_COMPTAGE, JSON.stringify({ valeurs: etat.comptage.valeurs, ordre: etat.comptage.ordre, lignes: etat.comptage.lignes, attendus: etat.comptage.attendus, mode: etat.comptage.mode, avant: etat.comptageAvant, le: new Date().toISOString() }));
   } catch {}
   finally { dessinerMenu(); }
 }
@@ -190,12 +209,16 @@ function reprendreComptage() {
   if (!g || etat.comptage) return false;
   const existe = new Set(piecesListe().map((p) => p.id));
   demarrerComptage();
-  for (const [id, v] of Object.entries(g.valeurs)) if (existe.has(Number(id))) etat.comptage.valeurs[id] = v;
+  for (const [id, v] of Object.entries(g.valeurs)) if (existe.has(Number(id))) {
+    etat.comptage.valeurs[id] = v;
+    etat.comptage.lignes[id] = g.lignes?.[id] ?? [];
+    if (g.attendus?.[id] !== undefined) etat.comptage.attendus[id] = g.attendus[id];
+  }
   etat.comptage.ordre = (g.ordre ?? []).filter((id) => etat.comptage.valeurs[id] !== undefined);
   etat.comptage.mode = g.mode ?? "chercher";
   if (g.avant) etat.comptageAvant = g.avant;
   const n = Object.keys(etat.comptage.valeurs).length;
-  flash(`Comptage en cours repris : ${n} ligne${n > 1 ? "s" : ""} déjà comptée${n > 1 ? "s" : ""}, pas encore enregistrée${n > 1 ? "s" : ""}.`);
+  flash(`Comptage en cours repris : ${n} ligne${n > 1 ? "s" : ""} déjà comptée${n > 1 ? "s" : ""} (et enregistrée${n > 1 ? "s" : ""}).`);
   return true;
 }
 
@@ -345,7 +368,7 @@ function ligneAjout(f, niveau, secondaire = false) {
     const { id } = await api("/pieces", { method: "POST", body: { nom: nom.value, famille_id: f.id, niveau: type.value, suivi: "quantite" } });
     if (etat.comptage) {
       etat.stock = await api("/stock");
-      if (quantite !== null) confirmer(pieceDe(id), quantite);
+      if (quantite !== null) await confirmer(pieceDe(id), quantite);
       flash(`« ${nom.value.trim()} » ajouté${quantite !== null ? `, compté ${quantite}` : ""}.`);
       etat.comptage.focus = idNom;
       dessinerStock();
@@ -380,7 +403,7 @@ function noteStock(p) {
 function caseComptage(p, id, apres) {
   const base = valeurCase(p);
   const input = h("input", { id, class: "compte", type: "text", inputmode: "text", enterkeyhint: "done", autocomplete: "off", value: String(base), "aria-label": "Compté pour " + p.nom });
-  const valider = (v) => tenter(async () => { confirmer(p, v); apres(); });
+  const valider = (v) => tenter(async () => { await confirmer(p, v); apres(); });
   input.addEventListener("focus", () => input.select());
   input.addEventListener("keydown", (e) => {
     if (e.key === "Enter") { e.preventDefault(); tenter(async () => valider(lireSaisie(input.value, base))); }
@@ -390,7 +413,7 @@ function caseComptage(p, id, apres) {
     input,
     h("button", { class: "btn-petit", type: "button", title: "Compté (le chiffre de la case est juste)", onclick: () => tenter(async () => valider(lireSaisie(input.value, base))) }, "✓"),
     h("button", { class: "btn-petit", type: "button", title: "Compté : il n'y en a pas", onclick: () => valider(0) }, "0"),
-    valeurSession(p) !== undefined ? h("button", { class: "btn-petit", type: "button", title: "Pas compté finalement", onclick: () => { retirer(p); dessinerStock(); } }, "↺") : null);
+    valeurSession(p) !== undefined ? h("button", { class: "btn-petit", type: "button", title: "Pas compté finalement (annule)", onclick: () => tenter(async () => { await retirer(p); dessinerStock(); }) }, "↺") : null);
 }
 
 function ligneStock(p) {
@@ -437,7 +460,7 @@ function ligneStock(p) {
   return h("tr", { class: [compte ? "compte-fait" : "", aCompter(p) ? "a-compter" : "", p.produit_id ? "ligne-variante" : ""].join(" ").trim() || null },
     h("td", { class: "col-badge" }, h("span", { class: "badge badge-" + p.niveau }, NIVEAUX[p.niveau])),
     h("td", { style: "font-weight:600" }, p.produit_id ? h("span", { class: "variante", title: p.nom }, p.variante) : p.nom,
-      c && comptable ? h("small", { class: "attendu" }, (p.produit_id ? p.produit + " · " : "") + "attendu " + p.stock) : null, statut),
+      c && comptable ? h("small", { class: "attendu" }, (p.produit_id ? p.produit + " · " : "") + "attendu " + (c.attendus[p.id] ?? p.stock)) : null, statut),
     h("td", { class: "num qte" + (comptable && p.stock < 0 ? " neg" : comptable && p.stock === 0 ? " zero" : "") }, comptable ? p.stock : "—"),
     h("td", { class: "note" }, noteStock(p)),
     h("td", { class: "col-action" }, h("div", { class: "actions-ligne" }, action, menuLigne(p))),
@@ -461,7 +484,7 @@ function menuLigne(p) {
 async function rechargerStock() {
   const [stock, ce] = await Promise.all([api("/stock"), api("/comptages/etat")]);
   etat.stock = stock; etat.depuis = ce.depuis; etat.depuisSalon = ce.salon;
-  if (etat.comptage) for (const id of Object.keys(etat.comptage.valeurs)) if (!pieceDe(Number(id))) retirer({ id: Number(id) });
+  if (etat.comptage) for (const id of Object.keys(etat.comptage.valeurs)) if (!pieceDe(Number(id))) oublierLigne(id);
   dessinerStock();
 }
 
@@ -483,7 +506,7 @@ async function supprimerPiece(p) {
 function ecartTexte(p) {
   const v = valeurSession(p);
   if (v === undefined) return h("span", { class: "ecart" });
-  const d = v - p.stock;
+  const d = v - (etat.comptage.attendus[p.id] ?? p.stock);
   return h("span", { class: "ecart" + (d > 0 ? " plus" : d === 0 ? " juste" : "") }, d ? signe(d) : "juste");
 }
 
@@ -597,7 +620,7 @@ function panneauRecherche() {
       const quantite = lireSaisie(qte.value, 0);
       const { id } = await api("/pieces", { method: "POST", body: { nom: cr.nom, famille_id: cr.famille, niveau: cr.niveau, suivi: "quantite" } });
       etat.stock = await api("/stock");
-      confirmer(pieceDe(id), quantite);
+      await confirmer(pieceDe(id), quantite);
       flash(`« ${cr.nom.trim()} » créé et compté ${quantite}.`);
       c.creation = null; c.recherche = ""; c.focus = "q-recherche";
       dessinerStock();
@@ -625,7 +648,7 @@ function panneauRecherche() {
         h("td", { style: "font-weight:600" }, h("a", { href: "#stock", onclick: (e) => { e.preventDefault(); choisir(p); } }, p.nom)),
         h("td", { class: "num qte" }, valeurSession(p)),
         h("td", {}, ecartTexte(p)),
-        h("td", { class: "num" }, h("button", { class: "btn-petit", title: "Pas compté finalement", onclick: () => { retirer(p); dessinerStock(); } }, "↺")))))) 
+        h("td", { class: "num" }, h("button", { class: "btn-petit", title: "Pas compté finalement (annule)", onclick: () => tenter(async () => { await retirer(p); dessinerStock(); }) }, "↺")))))) 
         : h("div", { class: "vide" }, "Rien encore. Prenez un objet, tapez son nom, puis la quantité.")),
 
   ];
@@ -637,7 +660,7 @@ function lignesSaisies() {
 
 function nbEcarts() {
   const stocks = new Map(piecesListe().map((p) => [p.id, p.stock]));
-  return lignesSaisies().filter((l) => l.compte !== stocks.get(l.piece_id)).length;
+  return lignesSaisies().filter((l) => l.compte !== (etat.comptage.attendus[l.piece_id] ?? stocks.get(l.piece_id))).length;
 }
 
 function barreComptage() {
@@ -646,18 +669,18 @@ function barreComptage() {
   const pct = vis.length ? Math.round((faits / vis.length) * 100) : 0;
   return h("div", { class: "barre-comptage", id: "barre-comptage" },
     h("div", { class: "progression", "aria-hidden": "true" }, h("i", { style: `width:${pct}%` })),
-    h("span", {}, `${lignesSaisies().length} compté(s) maintenant · ${nbEcarts()} écart(s) · ${faits} / ${vis.length} comptés ${refComptage()}`),
-    h("button", { class: "btn-sec", onclick: () => {
-      if (lignesSaisies().length && !confirm(`Abandonner ce comptage ? Les ${lignesSaisies().length} ligne(s) comptée(s) ne seront pas enregistrées.`)) return;
+    h("span", {}, `${lignesSaisies().length} compté(s), déjà enregistré(s) · ${nbEcarts()} écart(s) · ${faits} / ${vis.length} comptés ${refComptage()}`),
+    h("button", { class: "btn", onclick: () => {
+      const n = lignesSaisies().length, e = nbEcarts();
       etat.comptage = null; oublierComptage();
-      if (etat.comptageAvant) { etat.comptageAvant = null; location.hash = "accueil"; } else dessinerStock();
-    } }, "Abandonner"),
-    h("button", { class: "btn", onclick: () => tenter(sauverComptage) }, "Enregistrer le comptage"),
+      flash(n ? `Comptage terminé : ${n} ligne(s), ${e} chiffre(s) corrigé(s). Tout est déjà enregistré.` : "Comptage terminé.");
+      if (etat.comptageAvant) { etat.comptageAvant = null; location.hash = "accueil"; } else pageStock();
+    } }, "Terminer le comptage"),
   );
 }
 
 function demarrerComptage() {
-  etat.comptage = { valeurs: {}, ordre: [], mode: "chercher", recherche: "", choisi: null, creation: null, focus: "q-recherche" };
+  etat.comptage = { valeurs: {}, ordre: [], lignes: {}, attendus: {}, mode: "chercher", recherche: "", choisi: null, creation: null, focus: "q-recherche" };
   etat.ligneEnCours = null;
 }
 

@@ -303,11 +303,25 @@ app.post("/comptages", async (c) => {
   const res = await db.batch([
     ...instructionsComptage(db, lignes, type, salon_id),
     db.prepare(
-      "SELECT cl.piece_id, p.nom, cl.attendu, cl.compte, cl.compte - cl.attendu AS ecart, cl.comptage_id FROM comptage_ligne cl JOIN piece p ON p.id = cl.piece_id WHERE cl.comptage_id = (SELECT MAX(id) FROM comptage)",
+      "SELECT cl.id, cl.piece_id, p.nom, cl.attendu, cl.compte, cl.compte - cl.attendu AS ecart, cl.comptage_id FROM comptage_ligne cl JOIN piece p ON p.id = cl.piece_id WHERE cl.comptage_id = (SELECT MAX(id) FROM comptage)",
     ),
   ]);
   const detail = res[res.length - 1].results as { ecart: number; comptage_id: number }[];
   return c.json({ comptage_id: detail[0]?.comptage_id, lignes: detail, ecarts: detail.filter((d) => d.ecart !== 0).length }, 201);
+});
+
+// Annuler une ligne de comptage (« ↺ pas compté finalement ») : son mouvement de correction disparaît.
+app.delete("/comptages/lignes/:id", async (c) => {
+  const id = entier(c.req.param("id"), "id", 1);
+  const db = c.env.DB;
+  const l = await db.prepare("SELECT comptage_id FROM comptage_ligne WHERE id = ?").bind(id).first<{ comptage_id: number }>();
+  if (!l) erreur("Ligne de comptage introuvable.", 404);
+  await db.batch([
+    db.prepare("DELETE FROM mouvement WHERE source_type = 'comptage_ligne' AND source_id = ?").bind(id),
+    db.prepare("DELETE FROM comptage_ligne WHERE id = ?").bind(id),
+    db.prepare("DELETE FROM comptage WHERE id = ? AND NOT EXISTS (SELECT 1 FROM comptage_ligne WHERE comptage_id = ?)").bind(l.comptage_id, l.comptage_id),
+  ]);
+  return c.json({ ok: true });
 });
 
 // ───────────── Réglages (clé / valeur) ─────────────
