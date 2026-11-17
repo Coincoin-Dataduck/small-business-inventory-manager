@@ -135,7 +135,7 @@ app.get("/stock", async (c) => {
 
 // ───────────── Compter ─────────────
 // « Pas encore compté » = pas de comptage depuis le début de la préparation en cours.
-app.get("/comptages/etat", async (c) => c.json({ depuis: await debutPreparation(c.env.DB) }));
+app.get("/comptages/etat", async (c) => c.json(await debutPreparation(c.env.DB)));
 
 // Une seule façon de corriger un chiffre : on tape le vrai, l'outil enregistre la différence.
 app.post("/comptages", async (c) => {

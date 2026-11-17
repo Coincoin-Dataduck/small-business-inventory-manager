@@ -276,3 +276,20 @@ input.compte, .formulaire input, .formulaire select, .editeur select, .editeur i
   .filtres-stock .filtres { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
   .filtres-stock .pastille-filtre { white-space: nowrap; }
 }
+
+/* Ce qui n'est pas compté depuis le dernier salon */
+.statut { display: block; font-size: 12px; font-weight: 600; margin-top: 2px; }
+.statut.ok { color: var(--vert-texte); font-weight: 500; }
+.statut.ko { color: var(--alerte); }
+.tbl-stock tr.a-compter td:first-child { background: repeating-linear-gradient(-45deg, var(--vermillon) 0 2px, transparent 2px 5px) left top / 7px 100% no-repeat; padding-left: 16px; }
+.tete-famille { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; flex-wrap: wrap; padding-right: 14px; }
+.avancement-famille { display: flex; align-items: center; gap: 10px; font-size: 13px; font-weight: 600; color: var(--alerte); }
+.avancement-famille.complet { color: var(--vert-texte); }
+.avancement-famille .jauge { width: 110px; height: 10px; border: 2px solid var(--encre); background: var(--carte); }
+.avancement-famille .jauge i { display: block; height: 100%; background: var(--vermillon); }
+.avancement-famille.complet .jauge i { background: var(--vert); }
+.pastille-filtre.filtre-a-compter { border-style: dashed; color: var(--alerte); }
+.pastille-filtre.filtre-a-compter[aria-pressed="true"] { background: var(--vermillon); color: #fff; border-style: solid; }
+@media (max-width: 760px) { .en-comptage .tbl-stock tr.a-compter:not(.compte-fait) { box-shadow: inset 6px 0 0 var(--vermillon); } .en-comptage .tbl-stock tr.a-compter td:first-child { background: none; padding-left: 0; } }
+@media (max-width: 760px) { .stock:not(.en-comptage) .tbl-stock tr.a-compter td:nth-child(2) { background: repeating-linear-gradient(-45deg, var(--vermillon) 0 2px, transparent 2px 5px) left top / 7px 100% no-repeat; padding-left: 16px; } }
+@media (max-width: 760px) { .avancement-famille { padding: 0 0 4px 14px; } .avancement-famille .jauge { width: 70px; } }

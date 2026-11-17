@@ -58,7 +58,7 @@ function signe(n) { return n > 0 ? "+" + n : String(n); }
 
 // ───────────── Navigation ─────────────
 const etat = {
-  page: "stock", filtre: null, filtreType: null, depuis: null, comptage: null, ligneEnCours: null, stock: [], familles: [], edition: null,
+  page: "stock", filtre: null, filtreType: null, pasComptes: false, depuis: null, depuisSalon: null, comptage: null, ligneEnCours: null, stock: [], familles: [], edition: null,
   etapes: [], editeur: null, fait: null, faites: [],
   questions: [], nbQuestions: null, import: null, correspondances: [], corrEdition: null,
   params: [], salons: null, salonEdition: null, objectifs: null, plan: null, comptageAvant: null,
@@ -117,7 +117,7 @@ function entete(titre, action) {
 // « +5 » / « -2 » ajoute ou retire au chiffre de la case. Entrée ou ✓ = compté.
 async function pageStock() {
   const [stock, ce] = await Promise.all([api("/stock"), api("/comptages/etat")]);
-  etat.stock = stock; etat.depuis = ce.depuis;
+  etat.stock = stock; etat.depuis = ce.depuis; etat.depuisSalon = ce.salon;
   // Comptage avant une préparation : #stock/avant/<premier salon>
   if (etat.params[0] === "avant" && etat.params[1] && etat.comptage === null) {
     const salons = await api("/salons");
@@ -138,7 +138,9 @@ const pieceDe = (id) => piecesListe().find((p) => p.id === id);
 const filtreOk = (p) => (etat.filtre === null || p.famille_id === etat.filtre) && (!etat.filtreType || p.niveau === etat.filtreType);
 const valeurSession = (p) => etat.comptage?.valeurs[p.id];
 const valeurCase = (p) => valeurSession(p) ?? p.stock;
-const compteRecemment = (p) => !!p.dernier_comptage && (!etat.depuis || p.dernier_comptage >= etat.depuis);
+const compteRecemment = (p) => !!p.dernier_comptage && !!etat.depuis && p.dernier_comptage >= etat.depuis;
+const refComptage = () => (etat.depuisSalon ? "depuis " + etat.depuisSalon : "aujourd'hui");
+const aCompter = (p) => estComptable(p) && !dejaCompte(p);
 const dejaCompte = (p) => valeurSession(p) !== undefined || compteRecemment(p);
 
 function lireSaisie(texte, base) {
@@ -163,6 +165,7 @@ function retirer(p) {
   etat.comptage.ordre = etat.comptage.ordre.filter((x) => x !== p.id);
 }
 
+// Familles et lignes après les filtres famille et type (sans le filtre « pas encore comptés »).
 function piecesVisibles() {
   return etat.stock.filter((f) => etat.filtre === null || f.id === etat.filtre)
     .map((f) => ({ ...f, pieces: f.pieces.filter((p) => !etat.filtreType || p.niveau === etat.filtreType) }));
@@ -184,17 +187,18 @@ function dessinerStock() {
   const filtres = h("div", { class: "filtres-stock" },
     h("div", { class: "filtres" }, [{ id: null, nom: "Toutes les familles" }, ...etat.stock].map((f) =>
       pastille(etat.filtre === f.id, f.nom, () => { etat.filtre = f.id; dessinerStock(); }))),
-    h("div", { class: "filtres" }, [[null, "Tous les types"], ...Object.entries(NIVEAUX)].map(([k, v]) =>
-      pastille((etat.filtreType ?? null) === k, v, () => { etat.filtreType = k; dessinerStock(); }))));
+    h("div", { class: "filtres" },
+      h("button", { class: "pastille-filtre filtre-a-compter", "aria-pressed": String(etat.pasComptes), title: "Pas compté " + refComptage(),
+        onclick: () => { etat.pasComptes = !etat.pasComptes; dessinerStock(); } },
+        `Pas encore comptés (${piecesVisibles().flatMap((f) => f.pieces).filter(aCompter).length})`),
+      [[null, "Tous les types"], ...Object.entries(NIVEAUX)].map(([k, v]) =>
+        pastille((etat.filtreType ?? null) === k, v, () => { etat.filtreType = k; dessinerStock(); }))));
 
   let corps;
   if (enComptage) {
     const modes = h("div", { class: "filtres" },
       pastille(c.mode === "chercher", "Chercher un article", () => { c.mode = "chercher"; dessinerStock(); }),
-      pastille(c.mode === "liste", "Suivre la liste", () => { c.mode = "liste"; dessinerStock(); }),
-      c.mode === "liste" ? h("label", { class: "ligne-editeur note", style: "margin-left:8px" },
-        h("input", { type: "checkbox", checked: c.pasComptes, onchange: (e) => { c.pasComptes = e.target.checked; dessinerStock(); } }),
-        "seulement ce qui n'est pas encore compté") : null);
+      pastille(c.mode === "liste", "Suivre la liste", () => { c.mode = "liste"; dessinerStock(); }));
     corps = [modes, ...(c.mode === "chercher" ? panneauRecherche() : cartesFamilles()), barreComptage()];
   } else {
     corps = [...cartesFamilles(), formNouvelleFamille()];
@@ -209,10 +213,14 @@ function dessinerStock() {
 function cartesFamilles() {
   const c = etat.comptage;
   return piecesVisibles().map((f) => {
-    const pieces = c?.mode === "liste" && c.pasComptes ? f.pieces.filter((p) => estComptable(p) && !dejaCompte(p)) : f.pieces;
-    if (c?.mode === "liste" && c.pasComptes && !pieces.length) return null;
+    const pieces = etat.pasComptes ? f.pieces.filter(aCompter) : f.pieces;
+    if (etat.pasComptes && !pieces.length) return null;
+    const suivis = f.pieces.filter(estComptable), faits = suivis.filter(dejaCompte).length;
     return h("section", { class: "carte" },
-      h("h2", {}, f.nom),
+      h("div", { class: "tete-famille" }, h("h2", {}, f.nom),
+        suivis.length ? h("div", { class: "avancement-famille" + (faits === suivis.length ? " complet" : "") },
+          h("span", {}, `${faits} / ${suivis.length} comptés ${refComptage()}`),
+          h("span", { class: "jauge", "aria-hidden": "true" }, h("i", { style: `width:${Math.round((faits / suivis.length) * 100)}%` }))) : null),
       h("table", { class: "tbl tbl-stock" },
         h("colgroup", {}, h("col", { class: "c-badge" }), h("col", {}), h("col", { class: "c-qte" }), h("col", { class: "c-note" }), h("col", { class: "c-action" })),
         h("tbody", {}, lignesFamille(f, pieces))));
@@ -231,7 +239,7 @@ function lignesFamille(f, pieces) {
     if (!pieces.length) lignes.push(h("tr", {}, h("td", { colspan: 5, class: "note" }, "Rien ici pour l'instant.")));
     lignes.push(ligneAjout(f, etat.filtreType ?? (fournitures.length ? "achete" : "a_vendre")));
     // Famille qui n'a qu'un des deux groupes : de quoi ajouter l'autre (hors filtre « pas encore comptés »).
-    const tout = !etat.filtreType && !(etat.comptage?.pasComptes && etat.comptage.mode === "liste");
+    const tout = !etat.filtreType && !etat.pasComptes;
     if (tout && !f.pieces.some((p) => p.niveau === "a_vendre")) lignes.push(ligneAjout(f, "a_vendre", true));
     if (tout && !f.pieces.some((p) => p.niveau !== "a_vendre")) lignes.push(ligneAjout(f, "achete", true));
   }
@@ -278,7 +286,6 @@ function noteStock(p) {
   if (p.fin_de_serie) notes.push("Fin de série");
   if (p.suivi === "sans_quantite") notes.push(p.presque_vide ? "Pot presque vide" : "Sans quantité");
   if (p.suivi === "quantite" && p.stock < 0) notes.push("Négatif : à compter");
-  if (p.suivi === "quantite") notes.push(p.dernier_comptage ? "compté le " + fmtDate(p.dernier_comptage) : "jamais compté");
   return notes.join(" · ");
 }
 
@@ -335,9 +342,13 @@ function ligneStock(p) {
   }
 
   const compte = c && comptable && valeurSession(p) !== undefined;
-  return h("tr", { class: compte ? "compte-fait" : null },
+  const statut = !comptable ? null
+    : valeurSession(p) !== undefined ? h("small", { class: "statut ok" }, "✓ compté maintenant")
+    : compteRecemment(p) ? h("small", { class: "statut ok" }, "✓ compté le " + fmtDate(p.dernier_comptage))
+    : h("small", { class: "statut ko" }, "pas compté " + refComptage() + (p.dernier_comptage ? ` (dernier : ${fmtDate(p.dernier_comptage)})` : " (jamais)"));
+  return h("tr", { class: [compte ? "compte-fait" : "", comptable && !dejaCompte(p) ? "a-compter" : ""].join(" ").trim() || null },
     h("td", { class: "col-badge" }, h("span", { class: "badge badge-" + p.niveau }, NIVEAUX[p.niveau])),
-    h("td", { style: "font-weight:600" }, p.nom, c && comptable ? h("small", { class: "attendu" }, "attendu " + p.stock) : null),
+    h("td", { style: "font-weight:600" }, p.nom, c && comptable ? h("small", { class: "attendu" }, "attendu " + p.stock) : null, statut),
     h("td", { class: "num qte" + (comptable && p.stock < 0 ? " neg" : comptable && p.stock === 0 ? " zero" : "") }, comptable ? p.stock : "—"),
     h("td", { class: "note" }, noteStock(p)),
     h("td", { class: "col-action" }, action),
@@ -426,6 +437,12 @@ function panneauRecherche() {
 
   return [
     h("section", { class: "carte panneau-recherche" }, recherche, zoneResultats, zoneSaisie),
+    h("section", { class: "carte pas-comptes" },
+      h("div", { class: "tete-famille" }, h("h2", {}, `Pas encore comptés ${refComptage()} (${restants.length})`)),
+      parFamille.length ? h("div", { class: "liste-restants" }, parFamille.map(({ f, ps }) => h("div", {},
+        h("strong", {}, f.nom),
+        h("div", { class: "puces" }, ps.map((p) => h("button", { type: "button", class: "btn-petit", onclick: () => choisir(p) }, p.nom))))))
+        : h("div", { class: "vide" }, "Tout est compté.")),
     h("section", { class: "carte" }, h("h2", {}, `Comptés dans ce comptage (${comptes.length})`),
       comptes.length ? h("table", { class: "tbl" }, h("tbody", {}, comptes.map((p) => h("tr", {},
         h("td", { style: "font-weight:600" }, h("a", { href: "#stock", onclick: (e) => { e.preventDefault(); choisir(p); } }, p.nom)),
@@ -433,12 +450,7 @@ function panneauRecherche() {
         h("td", {}, ecartTexte(p)),
         h("td", { class: "num" }, h("button", { class: "btn-petit", title: "Pas compté finalement", onclick: () => { retirer(p); dessinerStock(); } }, "↺")))))) 
         : h("div", { class: "vide" }, "Rien encore. Prenez un objet, tapez son nom, puis la quantité.")),
-    h("details", { class: "carte pas-comptes" },
-      h("summary", { class: "resume-details" }, `Pas encore comptés (${restants.length})` + (etat.depuis ? ` depuis le ${fmtDate(etat.depuis)}` : "")),
-      parFamille.length ? h("div", { class: "liste-restants" }, parFamille.map(({ f, ps }) => h("div", {},
-        h("strong", {}, f.nom),
-        h("div", { class: "puces" }, ps.map((p) => h("button", { type: "button", class: "btn-petit", onclick: () => choisir(p) }, p.nom))))))
-        : h("div", { class: "vide" }, "Tout est compté.")),
+
   ];
 }
 
@@ -457,14 +469,14 @@ function barreComptage() {
   const pct = vis.length ? Math.round((faits / vis.length) * 100) : 0;
   return h("div", { class: "barre-comptage", id: "barre-comptage" },
     h("div", { class: "progression", "aria-hidden": "true" }, h("i", { style: `width:${pct}%` })),
-    h("span", {}, `${lignesSaisies().length} compté(s) maintenant · ${nbEcarts()} écart(s) · ${faits} / ${vis.length} à jour`),
+    h("span", {}, `${lignesSaisies().length} compté(s) maintenant · ${nbEcarts()} écart(s) · ${faits} / ${vis.length} comptés ${refComptage()}`),
     h("button", { class: "btn-sec", onclick: () => { etat.comptage = null; if (etat.comptageAvant) { etat.comptageAvant = null; location.hash = "accueil"; } else dessinerStock(); } }, "Annuler"),
     h("button", { class: "btn", onclick: () => tenter(sauverComptage) }, "Enregistrer le comptage"),
   );
 }
 
 function demarrerComptage() {
-  etat.comptage = { valeurs: {}, ordre: [], mode: "chercher", recherche: "", choisi: null, creation: null, pasComptes: false, focus: "q-recherche" };
+  etat.comptage = { valeurs: {}, ordre: [], mode: "chercher", recherche: "", choisi: null, creation: null, focus: "q-recherche" };
   etat.ligneEnCours = null;
 }
 
@@ -1795,7 +1807,7 @@ function dessinerAccueil() {
   const largeurPx = Math.max(680, (document.getElementById("page").clientWidth || 900) - 140);
   const items = [
     ...d.jalons.filter((j) => !j.type.startsWith("fabrication")).map((j) => ({ j, x: centre(j.date), titre: j.nom,
-      sous: fmtDate(j.date) + (j.type === "comptage" && d.comptage?.total && !j.fait ? ` · ${d.comptage.comptes}/${d.comptage.total} comptés` : "") })),
+      sous: fmtDate(j.date) + (j.type === "comptage" && d.comptage?.total && !j.fait ? ` · ${d.comptage.comptes}/${d.comptage.total} comptés` + (d.comptage.depuis_salon ? ` depuis ${d.comptage.depuis_salon}` : "") : "") })),
     ...d.salons.map((s) => ({ salon: s, x: pct(s.date_debut) + ((joursEntre(s.date_debut, s.fin) + 1) / total) * 50, titre: s.nom, sous: s.date_debut === s.fin ? fmtDate(s.date_debut) : `${fmtDate(s.date_debut)} → ${fmtDate(s.fin)}` })),
   ].sort((a, b) => a.x - b.x);
   const rangees = { h: [], b: [] };

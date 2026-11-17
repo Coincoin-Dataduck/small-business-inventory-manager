@@ -22,13 +22,13 @@ const versDate = (j: number) => new Date(j * JOUR).toISOString().slice(0, 10);
 export const aujourdhui = () => new Date().toISOString().slice(0, 10);
 
 // Début de la préparation en cours, pour savoir ce qui a été compté « récemment » :
-// le lendemain de la fin du dernier salon passé (null s'il n'y en a pas encore).
-export async function debutPreparation(db: D1Database, ajd = aujourdhui()): Promise<string | null> {
+// le lendemain de la fin du dernier salon passé. Sans salon passé : aujourd'hui (seul compte ce qui est compté maintenant).
+export async function debutPreparation(db: D1Database, ajd = aujourdhui()): Promise<{ depuis: string; salon: string | null }> {
   const r = await db.prepare(
-    `SELECT date(MAX(date(date_debut, '+' || (nb_jours - 1) || ' days')), '+1 day') AS depuis
-     FROM salon WHERE date(date_debut, '+' || (nb_jours - 1) || ' days') < ?`,
-  ).bind(ajd).first<{ depuis: string | null }>();
-  return r?.depuis ?? null;
+    `SELECT nom, date(date_debut, '+' || (nb_jours - 1) || ' days', '+1 day') AS depuis
+     FROM salon WHERE date(date_debut, '+' || (nb_jours - 1) || ' days') < ? ORDER BY depuis DESC, id DESC LIMIT 1`,
+  ).bind(ajd).first<{ nom: string; depuis: string }>();
+  return r ? { depuis: r.depuis, salon: r.nom } : { depuis: ajd, salon: null };
 }
 
 export async function lireReglages(db: D1Database): Promise<Reglages> {

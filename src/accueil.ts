@@ -36,13 +36,13 @@ accueil.get("/accueil", async (c) => {
 
   const ph = prep.salon_ids.map(() => "?").join(",");
   // Comptage avant : avancement sur les articles à vendre (comptés depuis le début de la préparation, d'où qu'on ait compté).
-  const depuis = await debutPreparation(db, ajd);
+  const { depuis, salon: depuisSalon } = await debutPreparation(db, ajd);
   const [jR, objR, cptR, espR] = await db.batch([
     db.prepare("SELECT id, type, nom, date, fait FROM jalon WHERE salon_id = ? ORDER BY date, id").bind(prep.id),
     db.prepare(`SELECT COUNT(*) AS n FROM objectif WHERE salon_id IN (${ph})`).bind(...prep.salon_ids),
     db.prepare(
       `SELECT COUNT(*) AS total, SUM(EXISTS (SELECT 1 FROM comptage_ligne cl JOIN comptage c ON c.id = cl.comptage_id
-         WHERE cl.piece_id = p.id AND (?1 IS NULL OR substr(c.date, 1, 10) >= ?1))) AS comptes
+         WHERE cl.piece_id = p.id AND substr(c.date, 1, 10) >= ?1)) AS comptes
        FROM piece p WHERE p.niveau = 'a_vendre' AND p.suivi = 'quantite' AND p.fin_de_serie = 0`,
     ).bind(depuis),
     db.prepare(`SELECT COUNT(*) AS n FROM salon s WHERE s.id IN (${ph}) AND (s.especes_montant IS NOT NULL OR EXISTS (SELECT 1 FROM vente_especes ve WHERE ve.salon_id = s.id))`).bind(...prep.salon_ids),
@@ -66,7 +66,7 @@ accueil.get("/accueil", async (c) => {
   defauts.fabrication_fin = plus(comptage, -1);
 
   const cpt0 = cptR.results[0] as { total: number; comptes: number | null };
-  const avComptage = { comptes: cpt0.comptes ?? 0, total: cpt0.total, depuis };
+  const avComptage = { comptes: cpt0.comptes ?? 0, total: cpt0.total, depuis, depuis_salon: depuisSalon };
   const auto: Record<string, boolean> = {
     objectifs: n(objR) > 0,
     commandes: n(objR) > 0 && achats.lignes.length === 0,
