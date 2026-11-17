@@ -241,6 +241,78 @@ bilan.put("/salons/:id/especes", async (c) => {
   return c.json({ ok: true, appliquees });
 });
 
+// ───────────── Caisse et écarts d'un salon ─────────────
+// Pour chaque article compté avant ET après le salon :
+//   attendu après = compté avant + tout ce qui a été enregistré entre les deux (ventes carte et espèces, étapes, réceptions)
+//   sortis sans trace = attendu après − compté après   (> 0 : manquants ; < 0 : en trop, ex. fabriqué sans « C'est fait »)
+// Valeur au prix SumUp (moyenne des ventes du nom de caisse qui désigne cet article seul, à l'unité).
+bilan.get("/salons/:id/caisse", async (c) => {
+  const id = entier(c.req.param("id"), "id", 1);
+  const db = c.env.DB;
+  const s = await db.prepare("SELECT id, nom, date_debut, date(date_debut, '+' || (nb_jours - 1) || ' days') AS fin FROM salon WHERE id = ?").bind(id)
+    .first<{ id: number; nom: string; date_debut: string; fin: string }>();
+  if (!s) erreur("Salon introuvable.", 404);
+  const [avR, apR, mvR, pR, prixPieceR, prixFamR, espR, prixCleR, fondR] = await db.batch([
+    // Dernier comptage de chaque article avant le premier jour du salon.
+    db.prepare(`SELECT cl.piece_id, cl.compte, c.date FROM comptage_ligne cl JOIN comptage c ON c.id = cl.comptage_id
+      WHERE substr(c.date, 1, 10) < ?1 AND c.date = (SELECT MAX(c2.date) FROM comptage_ligne l2 JOIN comptage c2 ON c2.id = l2.comptage_id WHERE l2.piece_id = cl.piece_id AND substr(c2.date, 1, 10) < ?1)`).bind(s.date_debut),
+    // Premier comptage de chaque article après le dernier jour du salon.
+    db.prepare(`SELECT cl.piece_id, cl.compte, c.date FROM comptage_ligne cl JOIN comptage c ON c.id = cl.comptage_id
+      WHERE substr(c.date, 1, 10) > ?1 AND c.date = (SELECT MIN(c2.date) FROM comptage_ligne l2 JOIN comptage c2 ON c2.id = l2.comptage_id WHERE l2.piece_id = cl.piece_id AND substr(c2.date, 1, 10) > ?1)`).bind(s.fin),
+    db.prepare("SELECT piece_id, quantite, motif, date FROM mouvement WHERE motif <> 'comptage' AND date >= ?").bind(s.date_debut + "T00:00:00Z"),
+    db.prepare("SELECT p.id, p.nom, p.famille_id, f.nom AS famille, f.modele_non_precise FROM piece p JOIN famille f ON f.id = p.famille_id WHERE p.niveau = 'a_vendre'"),
+    // Prix d'un article : noms de caisse qui désignent cet article seul, à l'unité.
+    db.prepare(`SELECT cp.piece_id, AVG(vl.prix) AS prix FROM correspondance_piece cp JOIN vente_ligne vl ON vl.cle = cp.cle
+      WHERE cp.quantite = 1 AND vl.prix IS NOT NULL
+        AND (SELECT COUNT(*) FROM correspondance_piece x WHERE x.cle = cp.cle) = 1
+        AND NOT EXISTS (SELECT 1 FROM correspondance_famille y WHERE y.cle = cp.cle)
+      GROUP BY cp.piece_id`),
+    // Prix d'un modèle non précisé à la caisse (ex. « Tampon unité ») : nom de caisse relié à la famille seule, × 1.
+    db.prepare(`SELECT cf.famille_id, AVG(vl.prix) AS prix FROM correspondance_famille cf JOIN vente_ligne vl ON vl.cle = cf.cle
+      WHERE cf.quantite = 1 AND vl.prix IS NOT NULL
+        AND (SELECT COUNT(*) FROM correspondance_famille x WHERE x.cle = cf.cle) = 1
+        AND NOT EXISTS (SELECT 1 FROM correspondance_piece y WHERE y.cle = cf.cle)
+      GROUP BY cf.famille_id`),
+    db.prepare("SELECT ve.cle, ve.quantite, c.nom_affiche FROM vente_especes ve JOIN correspondance c ON c.cle = ve.cle WHERE ve.salon_id = ?").bind(id),
+    db.prepare("SELECT cle, AVG(prix) AS prix FROM vente_ligne WHERE prix IS NOT NULL GROUP BY cle"),
+    db.prepare("SELECT valeur FROM reglage WHERE cle = 'fond_caisse'"),
+  ]);
+  const pieces = new Map((pR.results as { id: number; nom: string; famille_id: number; famille: string; modele_non_precise: number }[]).map((p) => [p.id, p]));
+  const prixPiece = new Map((prixPieceR.results as { piece_id: number; prix: number }[]).map((x) => [x.piece_id, x.prix]));
+  const prixFam = new Map((prixFamR.results as { famille_id: number; prix: number }[]).map((x) => [x.famille_id, x.prix]));
+  const prixDe = (pid: number) => { const p = pieces.get(pid); return prixPiece.get(pid) ?? (p?.modele_non_precise ? prixFam.get(p.famille_id) ?? null : null); };
+  const avant = new Map((avR.results as { piece_id: number; compte: number; date: string }[]).map((x) => [x.piece_id, x]));
+  const apres = new Map((apR.results as { piece_id: number; compte: number; date: string }[]).map((x) => [x.piece_id, x]));
+  const mv = mvR.results as { piece_id: number; quantite: number; motif: string; date: string }[];
+
+  const lignes = [];
+  for (const [pid, ap] of apres) {
+    const av = avant.get(pid);
+    const p = pieces.get(pid);
+    if (!av || !p) continue;
+    const entre = mv.filter((m) => m.piece_id === pid && m.date > av.date && m.date < ap.date);
+    const vendus = -entre.filter((m) => m.motif === "vente" || m.motif === "vente_especes").reduce((t, m) => t + m.quantite, 0);
+    const autres = entre.filter((m) => m.motif !== "vente" && m.motif !== "vente_especes").reduce((t, m) => t + m.quantite, 0);
+    const attendu = av.compte - vendus + autres;
+    const sansTrace = attendu - ap.compte;
+    if (!sansTrace) continue;
+    const prix = prixDe(pid);
+    lignes.push({ piece_id: pid, nom: p.nom, famille: p.famille, avant: av.compte, vendus, autres, apres: ap.compte, sans_trace: sansTrace, prix, valeur: prix === null ? null : Math.round(sansTrace * prix * 100) / 100 });
+  }
+  lignes.sort((a, b) => b.sans_trace - a.sans_trace || a.nom.localeCompare(b.nom));
+  const prixCle = new Map((prixCleR.results as { cle: string; prix: number }[]).map((x) => [x.cle, x.prix]));
+  const esp = (espR.results as { cle: string; quantite: number; nom_affiche: string }[]).map((e) => ({ ...e, prix: prixCle.get(e.cle) ?? null }));
+  const manquants = lignes.filter((l) => l.sans_trace > 0);
+  const somme = (xs: (number | null)[]) => Math.round(xs.reduce<number>((t, x) => t + (x ?? 0), 0) * 100) / 100;
+  return c.json({
+    salon: s,
+    fond_caisse: (fondR.results[0] as { valeur: string } | undefined) ? Number((fondR.results[0] as { valeur: string }).valeur) : null,
+    comptes_avant: avant.size, comptes_apres: apres.size,
+    especes_notees: { total: somme(esp.map((e) => (e.prix === null ? null : e.prix * e.quantite))), lignes: esp, sans_prix: esp.filter((e) => e.prix === null).map((e) => e.nom_affiche) },
+    sans_trace: { lignes, valeur_manquants: somme(manquants.map((l) => l.valeur)), manquants_sans_prix: manquants.filter((l) => l.prix === null).map((l) => l.nom) },
+  });
+});
+
 bilan.put("/salons/:id/mal-expose", async (c) => {
   const id = entier(c.req.param("id"), "id", 1);
   const b = await corps(c);

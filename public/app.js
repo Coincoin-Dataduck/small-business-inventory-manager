@@ -793,13 +793,23 @@ function dessinerReglages() {
       h("td", { class: "num" }, h("button", { class: "btn-petit", onclick: () => tenter(async () => {
         await api("/pieces/" + p.id, { method: "PATCH", body: { retire: false } }); flash(`« ${p.nom} » remis dans le stock.`); await pageReglages();
       }) }, "Remettre dans le stock"))))))) : null;
-  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, sectionThermometre(), familles, pieces, retires,
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, sectionFondCaisse(), sectionThermometre(), familles, pieces, retires,
     h("section", { class: "carte" }, h("h2", {}, "Recettes"), h("div", { class: "vide" }, "Les recettes ont leur propre page : ", h("a", { href: "#recettes" }, "Recettes"), ".")),
     sectionCorrespondances()));
 }
 
 // Article thermomètre : ses ventes mesurent le passage devant le stand (Tampon lot = × 4, Collection = × 20).
 // Famille thermomètre : ses ventes mesurent le passage devant le stand (Tampon lot = × 4, Collection = × 20).
+function sectionFondCaisse() {
+  const r = etat.reglages ?? {};
+  return h("section", { class: "carte" }, h("h2", {}, "Caisse"),
+    h("div", { class: "formulaire" },
+      h("label", { for: "fond-caisse" }, "Fond de caisse (€), toujours le même",
+        h("input", { id: "fond-caisse", type: "number", min: "0", step: "0.01", value: r.fond_caisse ?? "", style: "width:140px",
+          onchange: (e) => tenter(async () => { await api("/reglages", { method: "PUT", body: { cle: "fond_caisse", valeur: e.target.value } }); flash("Fond de caisse enregistré."); etat.reglages = await api("/reglages"); }) })),
+      h("p", { class: "note", style: "margin:0;font-size:13px;max-width:520px" }, "Sert au bilan de chaque salon (Caisse et écarts) : ce qu'il devrait y avoir dans la caisse pour tes articles.")));
+}
+
 function sectionThermometre() {
   const r = etat.reglages ?? {};
   const effectif = r.famille_thermometre_effectif ?? null;
@@ -2168,7 +2178,7 @@ function sauverCorrespondance(corps) {
 const euros = (x) => (Math.round(x * 100) / 100).toLocaleString("fr-FR", { style: "currency", currency: "EUR", maximumFractionDigits: x % 1 ? 2 : 0 });
 
 async function pageBilan(id) {
-  etat.bilan = await api(`/salons/${id}/bilan`);
+  [etat.bilan, etat.caisse] = await Promise.all([api(`/salons/${id}/bilan`), api(`/salons/${id}/caisse`)]);
   // Une case par nom de caisse et nombre de couleurs (encreurs) ; la couleur elle-même ne compte pas.
   const groupes = new Map();
   for (const c of etat.bilan.caisse) {
@@ -2199,7 +2209,7 @@ function dessinerBilan() {
   const alertes = [];
   if (aRelier) alertes.push(h("div", { class: "question" }, h("strong", {}, `${euros(aRelier)} de ventes avec des noms pas encore reliés`),
     h("div", {}, "Ils ne comptent ni dans les articles ni dans les tampons. ", h("a", { href: "#questions" }, "Les relier dans Questions"), ".")));
-  if (autres) alertes.push(h("div", { class: "note" }, `${euros(autres)} de ventes « non suivies » (ex. articles de Lucile) écartées du bilan.`));
+  if (autres) alertes.push(h("div", { class: "note" }, `${euros(autres)} de ventes « non suivies » (ex. articles de Lucille) écartées du bilan.`));
 
   const articles = h("section", { class: "carte" }, h("h2", {}, "Par article"),
     d.articles.length ? h("table", { class: "tbl" },
@@ -2234,8 +2244,49 @@ function dessinerBilan() {
         await pageBilan(d.salon.id);
       }) }, "Enregistrer les espèces")));
 
-  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, tuiles, ...alertes, articles, especes));
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, tuiles, ...alertes, articles, especes, sectionCaisse()));
 }
+
+// Caisse et écarts : ce qui est sorti du stock sans trace (ni carte ni espèces notées), et sa valeur.
+function sectionCaisse() {
+  const k = etat.caisse;
+  if (!k) return null;
+  const st = k.sans_trace, en = k.especes_notees;
+  const titre = h("h2", {}, "Caisse et écarts");
+  if (!k.comptes_avant || !k.comptes_apres) return h("section", { class: "carte" }, titre, h("div", { class: "vide" },
+    !k.comptes_avant ? "Pas de comptage avant ce salon : impossible de savoir ce qui est sorti sans trace." : "Pas encore de comptage après ce salon : comptez le stock au retour pour voir les écarts."));
+  const manquants = st.lignes.filter((l) => l.sans_trace > 0), enTrop = st.lignes.filter((l) => l.sans_trace < 0);
+  const tableau = (lignes, signe) => h("table", { class: "tbl" },
+    h("thead", {}, h("tr", {}, ["Article", "Avant", "Vendus (carte + espèces notées)", "Autres mouvements", "Après", signe > 0 ? "Manquent" : "En trop", "Prix", "Valeur"].map((t, i) => h("th", { class: i ? "num" : null }, t)))),
+    h("tbody", {}, lignes.map((l) => h("tr", {},
+      h("td", {}, h("strong", {}, l.nom), h("div", { class: "note", style: "font-size:12px" }, l.famille)),
+      h("td", { class: "num" }, l.avant), h("td", { class: "num" }, l.vendus || ""), h("td", { class: "num" }, l.autres ? signe1(l.autres) : ""),
+      h("td", { class: "num" }, l.apres), h("td", { class: "num qte" + (signe > 0 ? " neg" : "") }, Math.abs(l.sans_trace)),
+      h("td", { class: "num" }, l.prix === null ? "?" : euros(l.prix)), h("td", { class: "num" }, l.valeur === null ? "?" : euros(Math.abs(l.valeur)))))));
+  const fond = k.fond_caisse;
+  const attenduCaisse = (fond ?? 0) + en.total;
+  return h("section", { class: "carte" }, titre,
+    h("div", { class: "bandeau-caisse" },
+      h("div", {}, h("span", { class: "note" }, "Tes ventes en espèces notées"), h("strong", {}, euros(en.total)),
+        h("span", { class: "note" }, en.lignes.length ? `${en.lignes.reduce((t, e) => t + e.quantite, 0)} article(s), au prix SumUp` : "rien de noté (section Espèces ci-dessus)")),
+      h("div", {}, h("span", { class: "note" }, "Sortis sans trace (valeur)"), h("strong", {}, euros(st.valeur_manquants)),
+        h("span", { class: "note" }, `${manquants.reduce((t, l) => t + l.sans_trace, 0)} article(s) : vendus en espèces sans être notés, ou perdus, donnés…`)),
+      h("div", {}, h("span", { class: "note" }, "Fond de caisse"), h("strong", {}, fond === null ? "?" : euros(fond)),
+        fond === null ? h("a", { href: "#reglages", class: "note" }, "à indiquer dans Réglages") : h("span", { class: "note" }, "réglage"))),
+    h("div", { class: "lecture-caisse" },
+      h("p", {}, "Dans la caisse, pour tes articles, il devrait y avoir ", h("b", {}, euros(attenduCaisse)), ` (fond${fond === null ? " ?" : ""} + tes espèces notées), et jusqu'à `,
+        h("b", {}, euros(attenduCaisse + st.valeur_manquants)), " si tous les articles sortis sans trace ont été vendus en espèces."),
+      h("p", { class: "note" }, "Le reste du liquide compté revient à Lucille (ses ventes notées au cahier, plus celles qui auraient été oubliées).")),
+    st.manquants_sans_prix.length || en.sans_prix.length ? h("div", { class: "question", style: "margin:0 14px 14px" },
+      h("strong", {}, "Prix inconnu (non compté dans les totaux) : "), [...st.manquants_sans_prix, ...en.sans_prix].join(", ")) : null,
+    manquants.length ? [h("h3", { class: "sous-titre" }, "Articles manquants"), tableau(manquants, 1)] : h("div", { class: "vide" }, "Aucun article manquant : le stock tombe juste."),
+    enTrop.length ? [h("h3", { class: "sous-titre" }, "Articles en trop"),
+      h("p", { class: "note", style: "margin:0 14px" }, "Plus que prévu : souvent fabriqués sans « C'est fait » dans l'Atelier, ou une erreur au comptage d'avant. Pas comptés dans la valeur ci-dessus."),
+      tableau(enTrop, -1)] : null,
+    h("p", { class: "note", style: "margin:0;padding:8px 14px 14px;font-size:13px" },
+      `Calcul : pour chaque article compté avant (${k.comptes_avant}) et après (${k.comptes_apres}) le salon, attendu = compté avant − vendus + autres mouvements (fabrication, réceptions) ; l'écart avec le compté après est « sans trace ». Ventes en ligne entre le salon et le comptage comprises.`));
+}
+const signe1 = (n) => (n > 0 ? "+" + n : String(n));
 
 // ───────────── À acheter ─────────────
 async function pageAchats() {

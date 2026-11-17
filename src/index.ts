@@ -325,7 +325,7 @@ app.delete("/comptages/lignes/:id", async (c) => {
 });
 
 // ───────────── Réglages (clé / valeur) ─────────────
-const REGLAGES_MODIFIABLES = ["famille_thermometre", "seuil_jours", "marge", "marge_unique", "regroupement_auto", "tampons_min_ratio"];
+const REGLAGES_MODIFIABLES = ["famille_thermometre", "seuil_jours", "marge", "marge_unique", "regroupement_auto", "tampons_min_ratio", "fond_caisse"];
 app.get("/reglages", async (c) => {
   const { results } = await c.env.DB.prepare("SELECT cle, valeur FROM reglage").all<{ cle: string; valeur: string }>();
   const r = Object.fromEntries(results.filter((x) => REGLAGES_MODIFIABLES.includes(x.cle)).map((x) => [x.cle, x.valeur]));
