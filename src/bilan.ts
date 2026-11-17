@@ -2,7 +2,7 @@
 // Ventes d'un salon = carte (SumUp, rattachée par la date) + espèces saisies, par nom de caisse,
 // traduites en pièces par les correspondances. Les noms « Ne pas suivre » (ventes de Lucile…) sont exclus.
 import { Hono } from "hono";
-import { Env, erreur, entier, corps } from "./outils";
+import { rejouerComptages, Env, erreur, entier, corps } from "./outils";
 import { aujourdhui, lireReglages, Salon } from "./salons";
 import { appliquerEspeces } from "./sumup";
 
@@ -247,6 +247,7 @@ bilan.put("/salons/:id/especes", async (c) => {
     const { results } = await db.prepare(`SELECT cle FROM correspondance WHERE cle IN (${lignes.map(() => "?").join(",")})`).bind(...lignes.map((l) => l.cle)).all();
     if (results.length !== lignes.length) erreur("Nom de caisse inconnu.", 404);
   }
+  const { results: touchees } = await db.prepare("SELECT DISTINCT piece_id FROM mouvement WHERE source_type = 'vente_especes' AND source_id IN (SELECT id FROM vente_especes WHERE salon_id = ?)").bind(id).all<{ piece_id: number }>();
   await db.batch([
     db.prepare("DELETE FROM mouvement WHERE source_type = 'vente_especes' AND source_id IN (SELECT id FROM vente_especes WHERE salon_id = ?)").bind(id),
     db.prepare("DELETE FROM vente_especes WHERE salon_id = ?").bind(id),
@@ -254,6 +255,7 @@ bilan.put("/salons/:id/especes", async (c) => {
     db.prepare("UPDATE salon SET especes_montant = ? WHERE id = ?").bind(montant, id),
   ]);
   const appliquees = await appliquerEspeces(db, { salon_id: id });
+  await rejouerComptages(db, touchees.map((t) => t.piece_id)); // espèces retirées d'une saisie précédente
   return c.json({ ok: true, appliquees });
 });
 

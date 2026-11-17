@@ -85,3 +85,36 @@ export function instructionsComptage(db: D1Database, lignes: LigneComptage[], ty
   }
   return stmts;
 }
+
+/**
+ * Rejoue les comptages d'articles dans l'ordre des dates : chaque comptage redonne exactement le chiffre compté,
+ * même si un mouvement daté d'avant (ventes en espèces saisies après coup, stock d'avant ajouté) arrive plus tard.
+ */
+export async function rejouerComptages(db: D1Database, pieceIds: number[]) {
+  const ids = [...new Set(pieceIds)];
+  if (!ids.length) return;
+  const ph = ids.map(() => "?").join(",");
+  const [lR, mR] = await db.batch([
+    db.prepare(`SELECT cl.id, cl.piece_id, cl.compte, cl.attendu, c.date FROM comptage_ligne cl JOIN comptage c ON c.id = cl.comptage_id WHERE cl.piece_id IN (${ph}) ORDER BY c.date, cl.id`).bind(...ids),
+    db.prepare(`SELECT id, piece_id, quantite, motif, date, source_type, source_id FROM mouvement WHERE piece_id IN (${ph})`).bind(...ids),
+  ]);
+  const lignes = lR.results as { id: number; piece_id: number; compte: number; attendu: number; date: string }[];
+  const mvts = mR.results as { id: number; piece_id: number; quantite: number; motif: string; date: string; source_type: string | null; source_id: number | null }[];
+  const stmts: D1PreparedStatement[] = [];
+  for (const pid of ids) {
+    const autres = mvts.filter((m) => m.piece_id === pid && m.motif !== "comptage");
+    const corr = new Map(mvts.filter((m) => m.piece_id === pid && m.motif === "comptage" && m.source_type === "comptage_ligne").map((m) => [m.source_id, m]));
+    let faites = 0;
+    for (const l of lignes.filter((x) => x.piece_id === pid)) {
+      const attendu = autres.filter((m) => m.date < l.date).reduce((t, m) => t + m.quantite, 0) + faites;
+      const c = l.compte - attendu;
+      faites += c;
+      const ex = corr.get(l.id);
+      if (l.attendu !== attendu) stmts.push(db.prepare("UPDATE comptage_ligne SET attendu = ? WHERE id = ?").bind(attendu, l.id));
+      if (ex && c === 0) stmts.push(db.prepare("DELETE FROM mouvement WHERE id = ?").bind(ex.id));
+      else if (ex && ex.quantite !== c) stmts.push(db.prepare("UPDATE mouvement SET quantite = ? WHERE id = ?").bind(c, ex.id));
+      else if (!ex && c !== 0) stmts.push(db.prepare("INSERT INTO mouvement (piece_id, quantite, motif, date, source_type, source_id) VALUES (?, ?, 'comptage', ?, 'comptage_ligne', ?)").bind(pid, c, l.date, l.id));
+    }
+  }
+  if (stmts.length) await db.batch(stmts);
+}

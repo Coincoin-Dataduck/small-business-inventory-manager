@@ -4,7 +4,7 @@
 // - Une vente ne retire une pièce du stock que si elle a eu lieu après le début de son suivi
 //   (premier mouvement autre qu'une vente) : l'historique ancien sert aux statistiques, pas au stock.
 // - Import par tranches : le Worker gratuit est limité à 50 appels externes par exécution.
-import { Env } from "./outils";
+import { rejouerComptages, Env } from "./outils";
 
 const BASE = "https://api.sumup.com";
 const PAGE = 100;
@@ -45,6 +45,8 @@ async function ecrireVentes(db: D1Database, lignes: LigneAAppliquer[], motif: "v
   await db.batch(aAppliquer.map((r) => db.prepare(
     "INSERT INTO mouvement (piece_id, quantite, motif, date, source_type, source_id) VALUES (?, ?, ?, ?, ?, ?)",
   ).bind(r.piece_id, -r.q, motif, r.date, source_type, r.source_id)));
+  // Une vente datée d'avant un comptage (espèces saisies après coup, import en retard) : le comptage reste juste.
+  await rejouerComptages(db, ids);
 
   for (const [pid, vendus] of touchees) {
     const s0 = stockAvant.get(pid) ?? 0;
