@@ -274,9 +274,10 @@ bilan.get("/salons/:id/caisse", async (c) => {
     // Dernier comptage de chaque article avant le premier jour du salon.
     db.prepare(`SELECT cl.piece_id, cl.compte, c.date FROM comptage_ligne cl JOIN comptage c ON c.id = cl.comptage_id
       WHERE substr(c.date, 1, 10) < ?1 AND c.date = (SELECT MAX(c2.date) FROM comptage_ligne l2 JOIN comptage c2 ON c2.id = l2.comptage_id WHERE l2.piece_id = cl.piece_id AND substr(c2.date, 1, 10) < ?1)`).bind(s.date_debut),
-    // Premier comptage de chaque article après le dernier jour du salon.
+    // Dernier comptage de chaque article après le salon et avant le salon suivant (un recomptage corrige le premier).
     db.prepare(`SELECT cl.piece_id, cl.compte, c.date FROM comptage_ligne cl JOIN comptage c ON c.id = cl.comptage_id
-      WHERE substr(c.date, 1, 10) > ?1 AND c.date = (SELECT MIN(c2.date) FROM comptage_ligne l2 JOIN comptage c2 ON c2.id = l2.comptage_id WHERE l2.piece_id = cl.piece_id AND substr(c2.date, 1, 10) > ?1)`).bind(s.fin),
+      WHERE c.date = (SELECT MAX(c2.date) FROM comptage_ligne l2 JOIN comptage c2 ON c2.id = l2.comptage_id WHERE l2.piece_id = cl.piece_id
+        AND substr(c2.date, 1, 10) > ?1 AND substr(c2.date, 1, 10) < COALESCE((SELECT MIN(date_debut) FROM salon WHERE date_debut > ?1), '9999'))`).bind(s.fin),
     db.prepare("SELECT piece_id, quantite, motif, date FROM mouvement WHERE motif <> 'comptage' AND date >= ?").bind(s.date_debut + "T00:00:00Z"),
     db.prepare("SELECT p.id, p.nom, p.famille_id, f.nom AS famille, f.modele_non_precise FROM piece p JOIN famille f ON f.id = p.famille_id WHERE p.niveau = 'a_vendre'"),
     // Prix d'un article : noms de caisse qui désignent cet article seul, à l'unité.
