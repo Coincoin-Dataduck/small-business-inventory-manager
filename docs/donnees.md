@@ -66,3 +66,9 @@ Les **préparations ne sont pas stockées** : elles se déduisent des dates et d
 
 ## Réglages
 **reglage** — clé / valeur : regroupement auto, seuil (14 j), marge (30 %), marge unique par préparation, temps de travail, contrôle des tampons.
+
+## Produits à variantes (migration 0004, validé le 17/11/2026)
+- `produit` (famille, nom) regroupe des variantes ; chaque variante est une ligne `piece` (stock, comptage, ventes, recettes à part) avec `produit_id` et `variante`. Son nom complet reste dans `piece.nom` (« La salamandre A4 ») : le reste de l'outil lit toujours ce nom.
+- `famille.variantes` (JSON) : variantes proposées à la création d'un produit de la famille (Prints : A3, A4, A5 ; Kits : Maison, Serre). On peut en retirer à la création, en ajouter ensuite (« + variante »).
+- Renommer un produit renomme ses variantes.
+- Regroupement de départ : `scripts/regroupement_variantes.sql` (Tampon → petits noms ; prints → formats ; Kit, Jeu de planchettes, Livret → Maison/Serre ; Mini-presse et Planchette → motifs ; Peinture → couleurs ; fusion de « Plouf- Print Fine Art » dans Piou plouf et des deux Carnet ; famille Canards renommée Pins ; famille Carnets supprimée).

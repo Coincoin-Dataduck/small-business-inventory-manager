@@ -293,3 +293,21 @@ input.compte, .formulaire input, .formulaire select, .editeur select, .editeur i
 @media (max-width: 760px) { .en-comptage .tbl-stock tr.a-compter:not(.compte-fait) { box-shadow: inset 6px 0 0 var(--vermillon); } .en-comptage .tbl-stock tr.a-compter td:first-child { background: none; padding-left: 0; } }
 @media (max-width: 760px) { .stock:not(.en-comptage) .tbl-stock tr.a-compter td:nth-child(2) { background: repeating-linear-gradient(-45deg, var(--vermillon) 0 2px, transparent 2px 5px) left top / 7px 100% no-repeat; padding-left: 16px; } }
 @media (max-width: 760px) { .avancement-famille { padding: 0 0 4px 14px; } .avancement-famille .jauge { width: 70px; } }
+
+/* Produits à variantes */
+.tbl tr.produit td { padding: 12px 12px 4px; border-bottom: 0; }
+.tete-produit { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.tete-produit b { font-size: 15px; }
+.tete-produit .ajout-ligne input { flex: 0 1 200px; }
+.tbl-stock tr.ligne-variante td:nth-child(2) { padding-left: 28px; }
+.tbl-stock tr.ligne-variante .variante { position: relative; }
+.tbl-stock tr.ligne-variante .variante::before { content: "└"; position: absolute; left: -16px; color: var(--bord); }
+.ajout-ligne input.champ-variantes { flex: 0 1 190px; }
+@media (max-width: 760px) {
+  .en-comptage .tbl-stock tr.produit { display: block; margin: 10px 10px 0; }
+  .en-comptage .tbl-stock tr.produit td { display: block; padding: 0; }
+  .tbl-stock tr.ligne-variante td:nth-child(2) { padding-left: 22px; }
+  .en-comptage .tbl-stock tr.ligne-variante td:nth-child(2) { padding-left: 0; }
+  .en-comptage .tbl-stock tr.ligne-variante .variante::before { content: none; }
+}
+@media (max-width: 760px) { .en-comptage .tbl-stock tr.produit { border: 0; background: none; padding: 0; } }

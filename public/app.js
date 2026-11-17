@@ -233,9 +233,9 @@ function lignesFamille(f, pieces) {
   const titre = (t) => h("tr", { class: "groupe" }, h("td", { colspan: 5 }, t));
   const lignes = [];
   if (vente.length && fournitures.length) {
-    lignes.push(titre("À vendre"), ...vente.map(ligneStock), ligneAjout(f, "a_vendre"), titre("Fournitures"), ...fournitures.map(ligneStock), ligneAjout(f, "achete"));
+    lignes.push(titre("À vendre"), ...lignesProduits(vente), ligneAjout(f, "a_vendre"), titre("Fournitures"), ...lignesProduits(fournitures), ligneAjout(f, "achete"));
   } else {
-    lignes.push(...pieces.map(ligneStock));
+    lignes.push(...lignesProduits(pieces));
     if (!pieces.length) lignes.push(h("tr", {}, h("td", { colspan: 5, class: "note" }, "Rien ici pour l'instant.")));
     lignes.push(ligneAjout(f, etat.filtreType ?? (fournitures.length ? "achete" : "a_vendre")));
     // Famille qui n'a qu'un des deux groupes : de quoi ajouter l'autre (hors filtre « pas encore comptés »).
@@ -246,14 +246,66 @@ function lignesFamille(f, pieces) {
   return lignes;
 }
 
+// Produits à variantes : une ligne de titre (nom du produit, « + variante »), puis une ligne par variante.
+function lignesProduits(pieces) {
+  const lignes = [];
+  let courant = null;
+  for (const p of pieces) {
+    if (p.produit_id && p.produit_id !== courant) lignes.push(ligneProduit(p, pieces.filter((x) => x.produit_id === p.produit_id)));
+    courant = p.produit_id ?? null;
+    lignes.push(ligneStock(p));
+  }
+  return lignes;
+}
+
+function ligneProduit(p, variantes) {
+  const ouvert = etat.ajoutVariante === p.produit_id;
+  const suivis = variantes.filter(estComptable);
+  const total = suivis.reduce((t, x) => t + x.stock, 0);
+  let ajout = null;
+  if (ouvert) {
+    const champ = h("input", { id: "variante-" + p.produit_id, placeholder: "ex. A3, Miaou…", "aria-label": `Nouvelle variante de ${p.produit}`, autocomplete: "off" });
+    ajout = h("form", { class: "ajout-ligne", onsubmit: (e) => { e.preventDefault(); tenter(async () => {
+      if (!champ.value.trim()) return;
+      await api(`/produits/${p.produit_id}/variantes`, { method: "POST", body: { variante: champ.value } });
+      flash(`« ${p.produit} ${champ.value.trim()} » ajouté.`);
+      etat.stock = await api("/stock");
+      dessinerStock();
+      queueMicrotask(() => document.getElementById("variante-" + p.produit_id)?.focus());
+    }); } }, champ, h("button", { class: "btn-petit" }, "Ajouter"),
+      h("button", { type: "button", class: "btn-petit", onclick: () => { etat.ajoutVariante = null; dessinerStock(); } }, "Fermer"));
+    queueMicrotask(() => champ.focus());
+  }
+  return h("tr", { class: "produit" }, h("td", { colspan: 5 },
+    h("div", { class: "tete-produit" },
+      h("b", {}, p.produit),
+      h("span", { class: "note" }, `${variantes.length} variante${variantes.length > 1 ? "s" : ""}` + (suivis.length ? ` · ${total} en tout` : "")),
+      ouvert ? ajout : h("button", { type: "button", class: "btn-petit", onclick: () => { etat.ajoutVariante = p.produit_id; dessinerStock(); } }, "+ variante"))));
+}
+
+const variantesDe = (f) => (etat.stock.find((x) => x.id === f.id)?.variantes ?? []).join(", ");
+
 // Ajouter un article ou une fourniture sans quitter le Stock (ni le comptage) ; la quantité tapée est son premier comptage.
+// Avec des variantes (A3, A4, A5…), on crée un produit et une ligne par variante, chacune à compter.
 function ligneAjout(f, niveau, secondaire = false) {
   const idNom = `aj-${f.id}-${niveau}${secondaire ? "-2" : ""}`;
   const nom = h("input", { id: idNom, placeholder: niveau === "a_vendre" ? "+ ajouter un article à vendre" : "+ ajouter une fourniture", "aria-label": `Nom (${f.nom})`, autocomplete: "off" });
   const type = h("select", { "aria-label": "Type" }, Object.entries(NIVEAUX).map(([k, v]) => h("option", { value: k, selected: k === niveau }, v)));
   const qte = h("input", { class: "compte", type: "text", inputmode: "numeric", placeholder: "combien ?", "aria-label": "Combien en avez-vous ?" });
+  const variantes = h("input", { class: "champ-variantes", value: niveau === "a_vendre" ? variantesDe(f) : "", placeholder: "variantes (ex. A3, A4)", "aria-label": "Variantes, séparées par des virgules",
+    oninput: () => { qte.hidden = !!variantes.value.trim(); } });
+  qte.hidden = !!variantes.value.trim();
   const form = h("form", { class: "ajout-ligne", onsubmit: (e) => { e.preventDefault(); tenter(async () => {
     if (!nom.value.trim()) { nom.focus(); return; }
+    if (variantes.value.trim()) {
+      const r = await api("/produits", { method: "POST", body: { nom: nom.value, famille_id: f.id, niveau: type.value, variantes: variantes.value } });
+      flash(`« ${nom.value.trim()} » ajouté avec ${r.pieces.length} variante(s), à compter.`);
+      etat.stock = await api("/stock");
+      if (etat.comptage) etat.comptage.focus = idNom; 
+      dessinerStock();
+      if (!etat.comptage) queueMicrotask(() => document.getElementById(idNom)?.focus());
+      return;
+    }
     const quantite = qte.value.trim() === "" ? null : lireSaisie(qte.value, 0);
     const { id } = await api("/pieces", { method: "POST", body: { nom: nom.value, famille_id: f.id, niveau: type.value, suivi: "quantite" } });
     if (etat.comptage) {
@@ -268,7 +320,7 @@ function ligneAjout(f, niveau, secondaire = false) {
       await pageStock();
       queueMicrotask(() => document.getElementById(idNom)?.focus());
     }
-  }); } }, nom, type, qte, h("button", { class: "btn-petit" }, "Ajouter"));
+  }); } }, nom, type, variantes, qte, h("button", { class: "btn-petit" }, "Ajouter"));
   return h("tr", { class: "ajout" }, h("td", { colspan: 5 }, form));
 }
 
@@ -346,9 +398,10 @@ function ligneStock(p) {
     : valeurSession(p) !== undefined ? h("small", { class: "statut ok" }, "✓ compté maintenant")
     : compteRecemment(p) ? h("small", { class: "statut ok" }, "✓ compté le " + fmtDate(p.dernier_comptage))
     : h("small", { class: "statut ko" }, "pas compté " + refComptage() + (p.dernier_comptage ? ` (dernier : ${fmtDate(p.dernier_comptage)})` : " (jamais)"));
-  return h("tr", { class: [compte ? "compte-fait" : "", comptable && !dejaCompte(p) ? "a-compter" : ""].join(" ").trim() || null },
+  return h("tr", { class: [compte ? "compte-fait" : "", comptable && !dejaCompte(p) ? "a-compter" : "", p.produit_id ? "ligne-variante" : ""].join(" ").trim() || null },
     h("td", { class: "col-badge" }, h("span", { class: "badge badge-" + p.niveau }, NIVEAUX[p.niveau])),
-    h("td", { style: "font-weight:600" }, p.nom, c && comptable ? h("small", { class: "attendu" }, "attendu " + p.stock) : null, statut),
+    h("td", { style: "font-weight:600" }, p.produit_id ? h("span", { class: "variante", title: p.nom }, p.variante) : p.nom,
+      c && comptable ? h("small", { class: "attendu" }, (p.produit_id ? p.produit + " · " : "") + "attendu " + p.stock) : null, statut),
     h("td", { class: "num qte" + (comptable && p.stock < 0 ? " neg" : comptable && p.stock === 0 ? " zero" : "") }, comptable ? p.stock : "—"),
     h("td", { class: "note" }, noteStock(p)),
     h("td", { class: "col-action" }, action),
@@ -385,7 +438,8 @@ function panneauRecherche() {
   };
   const ouvrirCreation = () => {
     const derniere = c.ordre.length ? pieceDe(c.ordre[0])?.famille_id : null;
-    c.creation = { nom: c.recherche.trim(), famille: etat.filtre ?? derniere ?? etat.stock[0].id, niveau: etat.filtreType ?? "a_vendre" };
+    const famille = etat.filtre ?? derniere ?? etat.stock[0].id;
+    c.creation = { nom: c.recherche.trim(), famille, niveau: etat.filtreType ?? "a_vendre", variantes: variantesDe({ id: famille }) };
     c.focus = "q-creation-qte";
     dessinerStock();
   };
@@ -410,12 +464,24 @@ function panneauRecherche() {
   } else if (c.creation) {
     const cr = c.creation;
     const nom = h("input", { value: cr.nom, "aria-label": "Nom du nouvel article", oninput: (e) => { cr.nom = e.target.value; } });
-    const fam = h("select", { "aria-label": "Famille", onchange: (e) => { cr.famille = Number(e.target.value); } },
+    const champVar = h("input", { class: "champ-variantes", value: cr.variantes, placeholder: "variantes (ex. A3, A4)", "aria-label": "Variantes, séparées par des virgules",
+      oninput: (e) => { cr.variantes = e.target.value; qte.hidden = !!cr.variantes.trim(); } });
+    const fam = h("select", { "aria-label": "Famille", onchange: (e) => { cr.famille = Number(e.target.value); cr.variantes = variantesDe({ id: cr.famille }); champVar.value = cr.variantes; qte.hidden = !!cr.variantes.trim(); } },
       etat.stock.map((f) => h("option", { value: String(f.id), selected: f.id === cr.famille }, f.nom)));
     const type = h("select", { "aria-label": "Type", onchange: (e) => { cr.niveau = e.target.value; } },
       Object.entries(NIVEAUX).map(([k, v]) => h("option", { value: k, selected: k === cr.niveau }, v)));
     const qte = h("input", { id: "q-creation-qte", class: "compte", type: "text", inputmode: "numeric", placeholder: "combien ?", "aria-label": "Combien en avez-vous ?" });
+    qte.hidden = !!(cr.variantes ?? "").trim();
     zoneSaisie = h("form", { class: "saisie-choisi", onsubmit: (e) => { e.preventDefault(); tenter(async () => {
+      if ((cr.variantes ?? "").trim()) {
+        // Produit à variantes : on le crée, puis on retrouve ses variantes dans la recherche pour les compter une à une.
+        const r = await api("/produits", { method: "POST", body: { nom: cr.nom, famille_id: cr.famille, niveau: cr.niveau, variantes: cr.variantes } });
+        etat.stock = await api("/stock");
+        flash(`« ${cr.nom.trim()} » créé avec ${r.pieces.length} variante(s) : comptez-les ci-dessous.`);
+        c.creation = null; c.recherche = cr.nom.trim(); c.focus = "q-recherche";
+        dessinerStock();
+        return;
+      }
       if (qte.value.trim() === "") { qte.focus(); throw new Error("Indiquez combien vous en avez (0 si aucun)."); }
       const quantite = lireSaisie(qte.value, 0);
       const { id } = await api("/pieces", { method: "POST", body: { nom: cr.nom, famille_id: cr.famille, niveau: cr.niveau, suivi: "quantite" } });
@@ -425,8 +491,8 @@ function panneauRecherche() {
       c.creation = null; c.recherche = ""; c.focus = "q-recherche";
       dessinerStock();
     }); } },
-      h("b", {}, "Nouvel article"), h("div", { class: "ligne-editeur" }, nom, fam, type, qte),
-      h("div", { class: "ligne-editeur" }, h("button", { class: "btn" }, "Créer et compter"),
+      h("b", {}, "Nouvel article"), h("div", { class: "ligne-editeur" }, nom, fam, type, champVar, qte),
+      h("div", { class: "ligne-editeur" }, h("button", { class: "btn" }, (cr.variantes ?? "").trim() ? "Créer" : "Créer et compter"),
         h("button", { type: "button", class: "btn-sec", onclick: () => { c.creation = null; c.focus = "q-recherche"; dessinerStock(); } }, "Annuler")));
   }
 
@@ -533,6 +599,9 @@ function dessinerReglages() {
                 await api("/familles/" + f.id, { method: "PATCH", body: { modele_non_precise: e.target.checked } });
                 await pageReglages();
               }) }), "La caisse ne précise pas le modèle")),
+            h("td", {}, h("input", { value: (f.variantes ?? []).join(", "), placeholder: "variantes proposées (ex. A3, A4, A5)", "aria-label": `Variantes proposées pour ${f.nom}`,
+              title: "Proposées à chaque nouveau produit de la famille ; on peut en retirer à la création.", style: "min-width:220px",
+              onchange: (e) => tenter(async () => { await api("/familles/" + f.id, { method: "PATCH", body: { variantes: e.target.value } }); flash("Variantes enregistrées."); await pageReglages(); }) })),
             h("td", { class: "num" },
             h("button", { class: "btn-petit", onclick: () => tenter(async () => {
               const nom = prompt("Nouveau nom de la famille", f.nom);

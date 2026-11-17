@@ -36,8 +36,8 @@ const app = new Hono<{ Bindings: Env }>().basePath("/api");
 
 // ───────────── Familles ─────────────
 app.get("/familles", async (c) => {
-  const { results } = await c.env.DB.prepare("SELECT id, nom, ordre, modele_non_precise FROM famille ORDER BY ordre, nom").all();
-  return c.json(results);
+  const { results } = await c.env.DB.prepare("SELECT id, nom, ordre, modele_non_precise, variantes FROM famille ORDER BY ordre, nom").all<{ variantes: string | null }>();
+  return c.json(results.map((f) => ({ ...f, variantes: lireVariantes(f.variantes) })));
 });
 
 app.post("/familles", async (c) => {
@@ -57,6 +57,7 @@ app.patch("/familles/:id", async (c) => {
   if (b.nom !== undefined) { sets.push("nom = ?"); vals.push(texte(b.nom, "nom")); }
   if (b.ordre !== undefined) { sets.push("ordre = ?"); vals.push(entier(b.ordre, "ordre")); }
   if (b.modele_non_precise !== undefined) { sets.push("modele_non_precise = ?"); vals.push(b.modele_non_precise ? 1 : 0); }
+  if (b.variantes !== undefined) { const v = listeVariantes(b.variantes); sets.push("variantes = ?"); vals.push(v.length ? JSON.stringify(v) : null); }
   if (!sets.length) erreur("Rien à modifier.");
   try {
     const r = await c.env.DB.prepare(`UPDATE famille SET ${sets.join(", ")} WHERE id = ?`).bind(...vals, id).run();
@@ -106,6 +107,76 @@ app.patch("/pieces/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// ───────────── Produits à variantes ─────────────
+// Un produit (« La salamandre ») regroupe des variantes (A3, A4, A5) ; chaque variante est une ligne de stock
+// dont le nom complet est « <produit> <variante> ».
+function lireVariantes(v: string | null): string[] {
+  try { const a = v ? JSON.parse(v) : []; return Array.isArray(a) ? a.map(String) : []; } catch { return []; }
+}
+function listeVariantes(v: unknown): string[] {
+  const brut = Array.isArray(v) ? v : typeof v === "string" ? v.split(",") : erreur("Variantes : une liste, ex. A3, A4, A5.");
+  const vus = new Set<string>(), out: string[] = [];
+  for (const x of brut) { const t = String(x).trim(); if (t && !vus.has(t.toLowerCase())) { vus.add(t.toLowerCase()); out.push(t); } }
+  return out;
+}
+
+app.post("/produits", async (c) => {
+  const b = await corps(c);
+  const nom = texte(b.nom, "nom");
+  const famille_id = entier(b.famille_id, "famille", 1);
+  const niveau = choix(b.niveau, NIVEAUX, "niveau");
+  const suivi = b.suivi === undefined ? "quantite" : choix(b.suivi, SUIVIS, "suivi");
+  const variantes = listeVariantes(b.variantes ?? []);
+  if (!variantes.length) erreur("Indiquez au moins une variante (ou ajoutez un article simple).");
+  const db = c.env.DB;
+  if (!(await db.prepare("SELECT 1 FROM famille WHERE id = ?").bind(famille_id).first())) erreur("Famille introuvable.", 404);
+  const deja = await db.prepare(`SELECT nom FROM piece WHERE famille_id = ? AND nom IN (${variantes.map(() => "?").join(",")})`)
+    .bind(famille_id, ...variantes.map((v) => `${nom} ${v}`)).all<{ nom: string }>();
+  if (deja.results.length) erreur(`Existe déjà : ${deja.results.map((r) => r.nom).join(", ")}.`, 409);
+  const pr = await db.prepare("INSERT INTO produit (famille_id, nom) VALUES (?, ?) ON CONFLICT (famille_id, nom) DO UPDATE SET nom = excluded.nom RETURNING id")
+    .bind(famille_id, nom).first<{ id: number }>();
+  const res = await db.batch(variantes.map((v) =>
+    db.prepare("INSERT INTO piece (nom, famille_id, niveau, suivi, produit_id, variante) VALUES (?, ?, ?, ?, ?, ?) RETURNING id")
+      .bind(`${nom} ${v}`, famille_id, niveau, suivi, pr!.id, v)));
+  return c.json({ id: pr!.id, pieces: res.map((r, i) => ({ id: (r.results[0] as { id: number }).id, variante: variantes[i] })) }, 201);
+});
+
+// Ajouter une variante à un produit : même type et même suivi que ses autres variantes.
+app.post("/produits/:id/variantes", async (c) => {
+  const id = entier(c.req.param("id"), "id", 1);
+  const b = await corps(c);
+  const variante = texte(b.variante, "variante");
+  const db = c.env.DB;
+  const pr = await db.prepare(
+    "SELECT pr.nom, pr.famille_id, (SELECT niveau FROM piece WHERE produit_id = pr.id LIMIT 1) AS niveau, (SELECT suivi FROM piece WHERE produit_id = pr.id LIMIT 1) AS suivi FROM produit pr WHERE pr.id = ?",
+  ).bind(id).first<{ nom: string; famille_id: number; niveau: string | null; suivi: string | null }>();
+  if (!pr) erreur("Produit introuvable.", 404);
+  const niveau = b.niveau !== undefined ? choix(b.niveau, NIVEAUX, "niveau") : pr.niveau ?? "a_vendre";
+  const r = await db.prepare(
+    "INSERT INTO piece (nom, famille_id, niveau, suivi, produit_id, variante) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (famille_id, nom) DO NOTHING RETURNING id",
+  ).bind(`${pr.nom} ${variante}`, pr.famille_id, niveau, pr.suivi ?? "quantite", id, variante).first<{ id: number }>();
+  if (!r) erreur(`« ${pr.nom} ${variante} » existe déjà.`, 409);
+  return c.json({ id: r.id }, 201);
+});
+
+// Renommer un produit renomme toutes ses variantes.
+app.patch("/produits/:id", async (c) => {
+  const id = entier(c.req.param("id"), "id", 1);
+  const nom = texte((await corps(c)).nom, "nom");
+  const db = c.env.DB;
+  try {
+    const [r] = await db.batch([
+      db.prepare("UPDATE produit SET nom = ? WHERE id = ?").bind(nom, id),
+      db.prepare("UPDATE piece SET nom = ? || ' ' || variante WHERE produit_id = ?").bind(nom, id),
+    ]);
+    if (!r.meta.changes) erreur("Produit introuvable.", 404);
+  } catch (e) {
+    if (String(e).includes("UNIQUE")) erreur("Ce nom existe déjà dans cette famille.", 409);
+    throw e;
+  }
+  return c.json({ ok: true });
+});
+
 // Historique d'une pièce : explique le chiffre affiché.
 app.get("/pieces/:id/mouvements", async (c) => {
   const id = entier(c.req.param("id"), "id", 1);
@@ -118,11 +189,13 @@ app.get("/pieces/:id/mouvements", async (c) => {
 // ───────────── Stock ─────────────
 app.get("/stock", async (c) => {
   const [fams, pieces] = await c.env.DB.batch([
-    c.env.DB.prepare("SELECT id, nom, ordre, modele_non_precise FROM famille ORDER BY ordre, nom"),
+    c.env.DB.prepare("SELECT id, nom, ordre, modele_non_precise, variantes FROM famille ORDER BY ordre, nom"),
     c.env.DB.prepare(
       `SELECT p.id, p.nom, p.famille_id, p.niveau, p.suivi, p.fin_de_serie, p.presque_vide, ${STOCK_SQL} AS stock,
+         p.produit_id, p.variante, (SELECT nom FROM produit WHERE id = p.produit_id) AS produit,
          (SELECT substr(MAX(c.date), 1, 10) FROM comptage_ligne cl JOIN comptage c ON c.id = cl.comptage_id WHERE cl.piece_id = p.id) AS dernier_comptage
-       FROM piece p ORDER BY CASE p.niveau WHEN 'a_vendre' THEN 0 WHEN 'fait_maison' THEN 1 WHEN 'achete' THEN 2 ELSE 3 END, p.nom`,
+       FROM piece p ORDER BY CASE p.niveau WHEN 'a_vendre' THEN 0 WHEN 'fait_maison' THEN 1 WHEN 'achete' THEN 2 ELSE 3 END,
+         COALESCE((SELECT nom FROM produit WHERE id = p.produit_id), p.nom), p.variante, p.nom`,
     ),
   ]);
   const parFamille = new Map<number, unknown[]>();
@@ -130,7 +203,7 @@ app.get("/stock", async (c) => {
     if (!parFamille.has(p.famille_id)) parFamille.set(p.famille_id, []);
     parFamille.get(p.famille_id)!.push(p);
   }
-  return c.json((fams.results as { id: number }[]).map((f) => ({ ...f, pieces: parFamille.get(f.id) ?? [] })));
+  return c.json((fams.results as { id: number; variantes: string | null }[]).map((f) => ({ ...f, variantes: lireVariantes(f.variantes), pieces: parFamille.get(f.id) ?? [] })));
 });
 
 // ───────────── Compter ─────────────
