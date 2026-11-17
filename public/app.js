@@ -84,7 +84,8 @@ function dessinerMenu() {
         title: p.bientot ? "Pas encore construit" : null,
         onclick: () => { location.hash = p.id; },
       }, p.label, p.bientot ? h("span", { class: "bientot" }, "bientôt") : null,
-        p.id === "questions" && etat.nbQuestions ? h("span", { class: "pastille-nb" }, etat.nbQuestions) : null),
+        p.id === "questions" && etat.nbQuestions ? h("span", { class: "pastille-nb" }, etat.nbQuestions) : null,
+        p.id === "stock" && (etat.comptage || comptageGarde()) ? h("span", { class: "pastille-nb", title: "Comptage en cours, pas encore enregistré" }, "comptage") : null),
     ),
   );
 }
@@ -120,6 +121,7 @@ function entete(titre, action) {
 async function pageStock() {
   const [stock, ce] = await Promise.all([api("/stock"), api("/comptages/etat")]);
   etat.stock = stock; etat.depuis = ce.depuis; etat.depuisSalon = ce.salon;
+  reprendreComptage();
   // Comptage avant une préparation : #stock/avant/<premier salon>
   if (etat.params[0] === "avant" && etat.params[1] && etat.comptage === null) {
     const salons = await api("/salons");
@@ -163,10 +165,38 @@ function confirmer(p, valeur) {
   const c = etat.comptage;
   c.valeurs[p.id] = valeur;
   c.ordre = [p.id, ...c.ordre.filter((x) => x !== p.id)];
+  garderComptage();
 }
 function retirer(p) {
   delete etat.comptage.valeurs[p.id];
   etat.comptage.ordre = etat.comptage.ordre.filter((x) => x !== p.id);
+  garderComptage();
+}
+
+// Comptage en cours gardé dans ce navigateur à chaque ligne : rien n'est perdu si la page se recharge
+// ou si l'on change d'écran avant « Enregistrer le comptage ».
+const CLE_COMPTAGE = "stock-hervine:comptage-en-cours";
+function garderComptage() {
+  try {
+    if (!etat.comptage || !Object.keys(etat.comptage.valeurs).length) { localStorage.removeItem(CLE_COMPTAGE); return; }
+    localStorage.setItem(CLE_COMPTAGE, JSON.stringify({ valeurs: etat.comptage.valeurs, ordre: etat.comptage.ordre, mode: etat.comptage.mode, avant: etat.comptageAvant, le: new Date().toISOString() }));
+  } catch {}
+  finally { dessinerMenu(); }
+}
+function oublierComptage() { try { localStorage.removeItem(CLE_COMPTAGE); } catch {} dessinerMenu(); }
+function comptageGarde() { try { return JSON.parse(localStorage.getItem(CLE_COMPTAGE) || "null"); } catch { return null; } }
+function reprendreComptage() {
+  const g = comptageGarde();
+  if (!g || etat.comptage) return false;
+  const existe = new Set(piecesListe().map((p) => p.id));
+  demarrerComptage();
+  for (const [id, v] of Object.entries(g.valeurs)) if (existe.has(Number(id))) etat.comptage.valeurs[id] = v;
+  etat.comptage.ordre = (g.ordre ?? []).filter((id) => etat.comptage.valeurs[id] !== undefined);
+  etat.comptage.mode = g.mode ?? "chercher";
+  if (g.avant) etat.comptageAvant = g.avant;
+  const n = Object.keys(etat.comptage.valeurs).length;
+  flash(`Comptage en cours repris : ${n} ligne${n > 1 ? "s" : ""} déjà comptée${n > 1 ? "s" : ""}, pas encore enregistrée${n > 1 ? "s" : ""}.`);
+  return true;
 }
 
 // Familles et lignes après les filtres famille et type (sans le filtre « pas encore comptés »).
@@ -617,7 +647,11 @@ function barreComptage() {
   return h("div", { class: "barre-comptage", id: "barre-comptage" },
     h("div", { class: "progression", "aria-hidden": "true" }, h("i", { style: `width:${pct}%` })),
     h("span", {}, `${lignesSaisies().length} compté(s) maintenant · ${nbEcarts()} écart(s) · ${faits} / ${vis.length} comptés ${refComptage()}`),
-    h("button", { class: "btn-sec", onclick: () => { etat.comptage = null; if (etat.comptageAvant) { etat.comptageAvant = null; location.hash = "accueil"; } else dessinerStock(); } }, "Annuler"),
+    h("button", { class: "btn-sec", onclick: () => {
+      if (lignesSaisies().length && !confirm(`Abandonner ce comptage ? Les ${lignesSaisies().length} ligne(s) comptée(s) ne seront pas enregistrées.`)) return;
+      etat.comptage = null; oublierComptage();
+      if (etat.comptageAvant) { etat.comptageAvant = null; location.hash = "accueil"; } else dessinerStock();
+    } }, "Abandonner"),
     h("button", { class: "btn", onclick: () => tenter(sauverComptage) }, "Enregistrer le comptage"),
   );
 }
@@ -639,6 +673,7 @@ async function sauverComptage() {
   if (!lignes.length) throw new Error("Rien n'a été compté.");
   await enregistrerComptage(lignes, etat.comptageAvant);
   etat.comptage = null;
+  oublierComptage();
   if (etat.comptageAvant) { etat.comptageAvant = null; location.hash = "accueil"; return; }
   await pageStock();
 }
@@ -2542,7 +2577,8 @@ async function verifierVersion() {
     if (versionChargee === null) { versionChargee = version; return; }
     if (version !== versionChargee && !document.getElementById("nouvelle-version"))
       document.body.append(h("div", { id: "nouvelle-version", class: "nouvelle-version", role: "status" },
-        "Une nouvelle version de l'outil est en ligne. ", h("button", { class: "btn", onclick: () => location.reload() }, "Recharger")));
+        "Une nouvelle version de l'outil est en ligne. ", (etat.comptage || comptageGarde()) ? "Votre comptage en cours est gardé. " : "",
+        h("button", { class: "btn", onclick: () => location.reload() }, "Recharger")));
   } catch {}
 }
 verifierVersion();
