@@ -763,6 +763,7 @@ function lignePieceReglage(p) {
 async function pageRecettes() {
   [etat.stock, etat.recettes] = await Promise.all([api("/stock"), api("/recettes")]);
   if (etat.params[0]) etat.recetteSel = etat.params[0];
+  etat.travail = null;
   dessinerRecettes();
 }
 
@@ -825,6 +826,8 @@ function statutRecette(o) {
 }
 const TEXTE_STATUT = { ok: "complète", ko: "à faire", incomplete: "incomplète", commune: "", vide: "" };
 
+// L'établi : à gauche la recette à écrire, à droite les ingrédients (cherchés ou glissés).
+// Chaque étape : « On utilise » → « On obtient ». Une étape est enregistrée dès qu'elle est complète (nom + ce qu'on obtient).
 function dessinerRecettes() {
   entete("Recettes");
   const page = document.getElementById("page");
@@ -835,184 +838,258 @@ function dessinerRecettes() {
     return;
   }
   const sel = tous.find((o) => o.cle === etat.recetteSel) ?? tous.find((o) => o.type !== "commune") ?? tous[0];
-  etat.recetteSel = sel.cle;
-  const liste = h("nav", { class: "carte rc-liste", "aria-label": "Produits" }, groupes.map((g) => [
+  if (etat.recetteSel !== sel.cle || !etat.travail || etat.travail.cle !== sel.cle) {
+    etat.recetteSel = sel.cle;
+    etat.travail = { cle: sel.cle, etapes: etapesDe(sel).map(versTravail) };
+  }
+  const liste = h("nav", { class: "carte rc-liste", "aria-label": "Recettes" }, groupes.map((g) => [
     h("div", { class: "fam" }, g.famille.nom),
     g.items.map((o) => {
       const st = statutRecette(o);
       return h("button", { type: "button", class: "prod" + (o === sel ? " on" : ""), "aria-current": o === sel ? "true" : null,
-        onclick: () => { etat.recetteSel = o.cle; etat.recetteEdit = null; dessinerRecettes(); } },
+        onclick: () => { etat.recetteSel = o.cle; etat.travail = null; etat.palQ = ""; dessinerRecettes(); } },
         h("span", {}, o.nom, o.sous ? h("small", { class: "sous" }, " " + o.sous) : null),
         texteStatut(o, st) ? h("small", { class: "etat " + st }, texteStatut(o, st)) : null);
     })]));
-  page.replaceChildren(h("div", { class: "rc" }, liste, h("div", { class: "rc-main" }, ...carteRecette(sel))));
+  page.replaceChildren(h("div", { class: "rc3" }, liste, etabli(sel), palette(sel)));
   const f = etat.recetteFocus; etat.recetteFocus = null;
-  if (f) queueMicrotask(() => document.getElementById(f)?.focus());
+  if (f) queueMicrotask(() => { const el = document.getElementById(f); el?.focus(); el?.select?.(); });
 }
 
-function carteRecette(o) {
-  const etapes = etapesDe(o);
-  const ed = etat.recetteEdit && etat.recetteEdit.cle === o.cle ? etat.recetteEdit : null;
-  const resume = (r) => r.commune
-    ? `${r.lignes.map((l) => `${l.quantite} ${nomLigne(l)}`).join(" + ") || "rien"} → au choix ${r.formats.map((f) => `${f.quantite} ${f.variante}`).join(" ou ")}`
-    : `${r.lignes.filter((l) => l.sens === "utilise").map((l) => `${l.quantite} ${nomLigne(l)}`).join(" + ") || "rien"} → ${r.lignes.filter((l) => l.sens === "donne").map((l) => `${l.quantite} ${nomLigne(l)}`).join(" + ")}`;
-  const vaut = o.type === "produit"
-    ? h("div", { class: "vaut" }, "Une seule recette pour les ", h("b", {}, `${o.variantes.length} variante${o.variantes.length > 1 ? "s" : ""}`), " : ",
-        o.variantes.slice(0, 8).map((v) => v.variante).join(", ") + (o.variantes.length > 8 ? "…" : "") + ".")
-    : o.type === "commune" ? h("div", { class: "vaut" }, `Vaut pour tous les produits à vendre de la famille ${o.famille.nom}, selon leur variante (${o.famille.variantes.join(", ")}).`)
-    : o.niveau === "fait_maison" ? h("div", { class: "vaut" }, "Fourniture maison : préparée d'avance, gardée en réserve.") : null;
-  const st = statutRecette(o);
-  const tete = h("div", { class: "carte rc-tete" },
-    h("div", { class: "rc-titre" }, h("h2", {}, o.nom), texteStatut(o, st) ? h("span", { class: "etat " + st }, texteStatut(o, st)) : null),
-    vaut,
-    st === "commune" ? (() => { const r = fabriquePar(o.type === "produit" ? o.variantes[0] : o.piece); const c = r && (r.commune ? "f" + r.famille_id : r.produit_id ? "p" + r.produit_id : "a" + r.piece_id);
-      return h("div", { class: "vaut" }, "Fabriqué à l'étape « " + (r?.nom ?? "") + " » de la recette ", h("a", { href: "#recettes/" + c, onclick: (e) => { e.preventDefault(); etat.recetteSel = c; dessinerRecettes(); } }, nomRecette(r)), "."); })() : null,
-    etapes.length ? h("div", { class: "recap" }, h("strong", {}, `${etapes.length} étape${etapes.length > 1 ? "s" : ""}, dans l'ordre :`),
-      h("ol", {}, etapes.map((r) => h("li", {}, h("b", {}, r.nom), " : " + resume(r))))) : null);
-
-  const cartes = etapes.map((r, i) => (ed && ed.id === r.id ? editeurRecette(o, ed) : carteEtapeRecette(o, r, i, etapes)));
-  const manques = maisonsManquantes(o).map((m) => h("button", { type: "button", class: "ajout-etape manque", onclick: () => { etat.recetteSel = m.cle; etat.recetteEdit = null; ouvrirNouvelleEtape(); } },
-    `⚠ « ${m.nom} » est une fourniture maison que rien ne fabrique : + comment fait-on « ${m.nom} » ?`));
-  const nouvelle = ed && ed.id === null ? editeurRecette(o, ed)
-    : h("button", { type: "button", class: "ajout-etape", disabled: !!etat.recetteEdit, onclick: ouvrirNouvelleEtape }, etapes.length ? "+ Ajouter une étape" : "+ Écrire la première étape");
-  return [tete, ...cartes, nouvelle, ...manques];
+function versTravail(r) {
+  const formats = {};
+  for (const f of r.formats) formats[f.variante] = String(f.quantite);
+  return { id: r.id, nom: r.nom, mode: r.mode, temps_min: r.temps_min ?? "", formats,
+    utilise: r.lignes.filter((l) => l.sens === "utilise").map((l) => ({ piece_id: l.piece_id, produit_id: l.produit_id, quantite: l.quantite })),
+    donne: r.lignes.filter((l) => l.sens === "donne").map((l) => ({ piece_id: l.piece_id, produit_id: l.produit_id, quantite: l.quantite })) };
+}
+const proprioCourant = () => proprietaires().flatMap((g) => g.items).find((x) => x.cle === etat.recetteSel);
+function aCompleter(o, e) {
+  const manque = [];
+  if (!String(e.nom).trim()) manque.push("un nom");
+  if (o.type === "commune" ? !Object.values(e.formats).some((q) => String(q).trim()) : !e.donne.length) manque.push("ce qu'on obtient");
+  return manque;
 }
 
-function carteEtapeRecette(o, r, i, etapes) {
-  const jeton = (l, cls = "") => h("span", { class: "jeton " + cls }, h("span", { class: "q" }, l.quantite), nomLigne(l));
-  const avant = (l) => { const j = etapes.slice(0, i).findIndex((x) => x.lignes.some((y) => y.sens === "donne" && memeLigne(y, l))); return j >= 0 ? h("span", { class: "lien-etape" }, `← faite à l'étape ${j + 1}`) : null; };
-  const apres = (l) => { const k = etapes.slice(i + 1).findIndex((x) => x.lignes.some((y) => y.sens === "utilise" && memeLigne(y, l))); return k >= 0 ? h("span", { class: "lien-etape" }, `→ sert à l'étape ${i + k + 2}`) : null; };
-  const utilise = r.lignes.filter((l) => l.sens === "utilise"), donne = r.lignes.filter((l) => l.sens === "donne");
-  const et = (xs, f) => xs.flatMap((x, k) => (k ? [" + ", ...f(x)] : f(x)));
-  return h("div", { class: "carte etape-phrase" },
-    h("div", { class: "titre" }, h("span", { class: "numero" }, i + 1), h("b", {}, r.nom),
-      h("span", { class: "note" }, r.mode === "par_matiere" ? "tout d'un coup" : "un par un"),
-      h("span", { class: "actions-ligne", style: "margin-left:auto" },
-        h("button", { class: "btn-petit", disabled: i === 0 || !!etat.recetteEdit, title: "Monter", "aria-label": "Monter l'étape", onclick: () => deplacerEtape(r, "haut") }, "↑"),
-        h("button", { class: "btn-petit", disabled: i === etapes.length - 1 || !!etat.recetteEdit, title: "Descendre", "aria-label": "Descendre l'étape", onclick: () => deplacerEtape(r, "bas") }, "↓"),
-        h("button", { class: "btn-petit", disabled: !!etat.recetteEdit, onclick: () => { etat.recetteEdit = editionDepuis(o, r); dessinerRecettes(); } }, "Modifier"),
-        h("button", { class: "btn-petit danger", disabled: !!etat.recetteEdit, onclick: () => tenter(async () => {
-          if (!confirm(`Supprimer l'étape « ${r.nom} » ?`)) return;
-          await api("/recettes/" + r.id, { method: "DELETE" }); flash("Étape supprimée."); await pageRecettes();
-        }) }, "Supprimer"))),
-    h("div", { class: "phrase" }, "En une fois, on utilise ", ...(utilise.length ? et(utilise, (l) => [jeton(l), avant(l)]) : [h("span", { class: "note" }, "rien de suivi")]),
-      r.commune
-        ? [" et on obtient, au choix : ", ...r.formats.flatMap((f, k) => [k ? " ou " : "", h("span", { class: "jeton var" }, h("span", { class: "q" }, f.quantite), f.variante)])]
-        : [" et on obtient ", ...et(donne, (l) => [jeton(l, l.produit_id ? "var" : ""), apres(l)])],
-      " · ", r.temps_min === null ? h("span", { class: "jeton temps vide" }, "durée ?") : h("span", { class: "jeton temps" }, h("span", { class: "q" }, r.temps_min), "min")),
-    r.temps_min === null ? h("div", { class: "note", style: "font-size:13px" }, "Durée pas encore renseignée : l'Atelier ne pourra pas compter ce temps.") : null);
-}
-
-async function deplacerEtape(r, sens) {
-  await tenter(async () => { await api(`/recettes/${r.id}/deplacer`, { method: "POST", body: { sens } }); await pageRecettes(); });
-}
-
-function nouvelleEdition(o) {
-  return {
-    cle: o.cle, id: null, nom: "", mode: "a_la_piece", temps_min: "",
-    utilise: [],
-    donne: o.type === "produit" ? [{ produit_id: o.produit_id, quantite: 1 }] : o.type === "piece" ? [{ piece_id: o.piece.id, quantite: 1 }] : [],
-    formats: Object.fromEntries((o.famille.variantes ?? []).map((v) => [v, ""])),
-  };
-}
-function editionDepuis(o, r) {
-  const ed = nouvelleEdition(o);
-  Object.assign(ed, { id: r.id, nom: r.nom, mode: r.mode, temps_min: r.temps_min ?? "",
-    utilise: r.lignes.filter((l) => l.sens === "utilise").map((l) => ({ ...l })),
-    donne: r.lignes.filter((l) => l.sens === "donne").map((l) => ({ ...l })) });
-  for (const f of r.formats) ed.formats[f.variante] = String(f.quantite);
-  return ed;
-}
-function ouvrirNouvelleEtape() {
-  const o = proprietaires().flatMap((g) => g.items).find((x) => x.cle === etat.recetteSel);
-  if (!o) return;
-  etat.recetteEdit = nouvelleEdition(o);
-  etat.recetteFocus = "rc-nom";
+// Enregistre l'étape si elle est complète (sinon elle reste « à compléter » à l'écran).
+async function sauverEtape(o, e) {
+  if (aCompleter(o, e).length) { dessinerRecettes(); return; }
+  const lignes = [...e.utilise.map((l) => ({ ...l, sens: "utilise" })), ...e.donne.map((l) => ({ ...l, sens: "donne" }))]
+    .map((l) => ({ sens: l.sens, piece_id: l.piece_id ?? null, produit_id: l.produit_id ?? null, quantite: Math.max(1, Number(l.quantite) || 1) }));
+  const body = { nom: e.nom, mode: e.mode, temps_min: String(e.temps_min).trim() === "" ? null : Number(String(e.temps_min).replace(",", ".")), lignes,
+    formats: Object.entries(e.formats).filter(([, q]) => String(q).trim() !== "").map(([variante, q]) => ({ variante, quantite: Number(q) })),
+    ...(o.type === "commune" ? { commune: true, famille_id: o.famille.id } : o.type === "produit" ? { produit_id: o.produit_id } : { piece_id: o.piece.id }) };
+  await tenter(async () => {
+    if (e.id) await api("/recettes/" + e.id, { method: "PUT", body });
+    else {
+      await api("/recettes", { method: "POST", body });
+      const avant = new Set(etat.recettes.map((r) => r.id));
+      etat.recettes = await api("/recettes");
+      e.id = etat.recettes.find((r) => !avant.has(r.id))?.id ?? null;
+      flash("Étape enregistrée.");
+    }
+    etat.recettes = await api("/recettes");
+  });
   dessinerRecettes();
 }
 
-function editeurRecette(o, ed) {
-  const nom = h("input", { id: "rc-nom", value: ed.nom, placeholder: "ex. Graver, Coller, Peindre et découper…", "aria-label": "Nom de l'étape", oninput: (e) => { ed.nom = e.target.value; } });
-  const temps = h("input", { class: "compte", type: "text", inputmode: "decimal", value: String(ed.temps_min), placeholder: "?", "aria-label": "Durée en minutes", oninput: (e) => { ed.temps_min = e.target.value; } });
-  const sortie = o.type === "commune"
-    ? [" et on obtient, au choix : ", ...Object.keys(ed.formats).flatMap((v, k) => [k ? " ou " : "", h("span", { class: "jeton var" },
-        h("input", { class: "q-saisie", type: "text", inputmode: "numeric", value: ed.formats[v], placeholder: "–", "aria-label": `Combien de ${v} en une fois`, oninput: (e) => { ed.formats[v] = e.target.value; } }), v)]),
-       h("span", { class: "note" }, " (laisser vide : pas ce format)")]
-    : [" et on obtient ", lignesEdition(o, ed, "donne")];
-  const enregistrer = () => tenter(async () => {
-    const lignes = [...ed.utilise.map((l) => ({ ...l, sens: "utilise" })), ...ed.donne.map((l) => ({ ...l, sens: "donne" }))]
-      .filter((l) => l.piece_id || l.produit_id).map((l) => ({ sens: l.sens, piece_id: l.piece_id ?? null, produit_id: l.produit_id ?? null, quantite: Number(l.quantite) }));
-    const body = { nom: ed.nom, mode: ed.mode, temps_min: String(ed.temps_min).trim() === "" ? null : Number(String(ed.temps_min).replace(",", ".")), lignes,
-      formats: Object.entries(ed.formats).filter(([, q]) => String(q).trim() !== "").map(([variante, q]) => ({ variante, quantite: Number(q) })),
-      ...(o.type === "commune" ? { commune: true, famille_id: o.famille.id } : o.type === "produit" ? { produit_id: o.produit_id } : { piece_id: o.piece.id }) };
-    await api(ed.id ? "/recettes/" + ed.id : "/recettes", { method: ed.id ? "PUT" : "POST", body });
-    flash(ed.id ? "Étape enregistrée." : "Étape ajoutée.");
-    etat.recetteEdit = null;
-    await pageRecettes();
+function etabli(o) {
+  const etapes = etat.travail.etapes;
+  const st = statutRecette(o);
+  const n = (l) => l.map((x) => `${x.quantite} ${nomLigne(x)}`).join(" + ") || "…";
+  const sortieTexte = (e) => (o.type === "commune" ? "au choix " + (Object.entries(e.formats).filter(([, q]) => String(q).trim()).map(([v, q]) => `${q} ${v}`).join(" ou ") || "…") : n(e.donne));
+  const vaut = o.type === "produit" ? `vaut pour ${o.variantes.length > 1 ? `les ${o.variantes.length} variantes` : "sa variante"}`
+    : o.type === "commune" ? `vaut pour tous les ${o.famille.nom.toLowerCase()} (${o.famille.variantes.join(", ")})` : o.niveau === "fait_maison" ? "fourniture maison" : "";
+  const fabriqueAilleurs = st === "commune" ? fabriquePar(o.type === "produit" ? o.variantes[0] : o.piece) : null;
+  const tete = h("div", { class: "et-tete" },
+    h("span", { class: "sur" }, "Recette"),
+    h("h2", {}, o.nom, vaut ? h("span", { class: "etat ok" }, vaut) : null, texteStatut(o, st) && st !== "ok" ? h("span", { class: "etat " + st }, texteStatut(o, st)) : null),
+    o.type === "produit" ? h("div", { class: "note" }, o.variantes.slice(0, 10).map((v) => v.variante).join(", ") + (o.variantes.length > 10 ? "…" : "")) : null,
+    fabriqueAilleurs ? h("div", { class: "note" }, `Déjà fabriqué à l'étape « ${fabriqueAilleurs.nom} » de la recette ${nomRecette(fabriqueAilleurs)}.`) : null,
+    etapes.length ? [h("div", { class: "note" }, "En résumé :"), h("ol", {}, etapes.map((e) => h("li", {}, h("b", {}, e.nom || "(sans nom)"), " : " + n(e.utilise) + " → " + sortieTexte(e))))] : null);
+
+  const lignes = etapes.map((e, i) => {
+    const manque = aCompleter(o, e);
+    const temps = h("input", { class: String(e.temps_min).trim() ? "" : "vide", value: String(e.temps_min), placeholder: "?", inputmode: "decimal", "aria-label": `Durée de l'étape ${i + 1} en minutes`,
+      onchange: (ev) => { e.temps_min = ev.target.value; sauverEtape(o, e); } });
+    return h("div", { class: "et-etape" + (manque.length ? " incomplete" : "") },
+      h("span", { class: "rond" }, i + 1),
+      h("div", { class: "nomligne" },
+        h("input", { id: `et-nom-${i}`, class: "nom", value: e.nom, placeholder: "Nommer l'étape…", "aria-label": `Nom de l'étape ${i + 1}`,
+          onchange: (ev) => { e.nom = ev.target.value; sauverEtape(o, e); }, onkeydown: (ev) => { if (ev.key === "Enter") ev.target.blur(); } }),
+        h("span", { class: "meta" }, "⏱", temps, "min ·",
+          h("button", { type: "button", title: "Peut-on en faire juste quelques-uns ?", onclick: () => { e.mode = e.mode === "par_matiere" ? "a_la_piece" : "par_matiere"; sauverEtape(o, e); } },
+            e.mode === "par_matiere" ? "tout d'un coup" : "un par un")),
+        h("span", { class: "outils-etape" },
+          h("button", { type: "button", class: "btn-petit", disabled: i === 0 || !e.id || !etapes[i - 1]?.id, "aria-label": "Monter l'étape", onclick: () => deplacerEtape(e, "haut") }, "↑"),
+          h("button", { type: "button", class: "btn-petit", disabled: i === etapes.length - 1 || !e.id || !etapes[i + 1]?.id, "aria-label": "Descendre l'étape", onclick: () => deplacerEtape(e, "bas") }, "↓"),
+          h("button", { type: "button", class: "btn-petit danger", "aria-label": "Supprimer l'étape", onclick: () => tenter(async () => {
+            if (e.id) { if (!confirm(`Supprimer l'étape « ${e.nom} » ?`)) return; await api("/recettes/" + e.id, { method: "DELETE" }); etat.recettes = await api("/recettes"); }
+            etapes.splice(i, 1); dessinerRecettes();
+          }) }, "×"))),
+      h("div", { class: "flux" }, depot(o, e, i, "utilise"), h("span", { class: "fl", "aria-hidden": "true" }, "→"),
+        o.type === "commune" ? depotFormats(o, e) : depot(o, e, i, "donne")),
+      manque.length ? h("div", { class: "a-completer" }, "À compléter : " + manque.join(" et ") + " (rien n'est enregistré avant).") : null);
   });
-  return h("form", { class: "carte etape-phrase edition", onsubmit: (e) => { e.preventDefault(); enregistrer(); } },
-    h("div", { class: "titre" }, h("span", { class: "numero" }, "✎"), nom),
-    h("div", { class: "phrase" }, "En une fois, on utilise ", lignesEdition(o, ed, "utilise"), ...sortie, " · ça prend ", h("span", { class: "jeton temps" }, temps, "min")),
-    h("div", { class: "question-mode" }, "On peut en faire juste quelques-uns ?",
-      h("button", { type: "button", class: "pastille-filtre", "aria-pressed": String(ed.mode === "a_la_piece"), onclick: () => { ed.mode = "a_la_piece"; dessinerRecettes(); } }, "Oui, un par un"),
-      h("button", { type: "button", class: "pastille-filtre", "aria-pressed": String(ed.mode === "par_matiere"), onclick: () => { ed.mode = "par_matiere"; dessinerRecettes(); } }, "Non, tout d'un coup (une plaque, une feuille…)")),
-    h("div", { class: "ligne-editeur" }, h("button", { class: "btn" }, "Enregistrer"),
-      h("button", { type: "button", class: "btn-sec", onclick: () => { etat.recetteEdit = null; dessinerRecettes(); } }, "Annuler")));
+  const manques = maisonsManquantes(o).map((m) => h("button", { type: "button", class: "et-ajout manque", onclick: () => { etat.recetteSel = m.cle; etat.travail = null; dessinerRecettes(); } },
+    `⚠ « ${m.nom} » est faite maison mais rien ne la fabrique : écrire sa recette`));
+  return h("div", { class: "et-main" }, h("div", { class: "et-bloc" }, tete, ...lignes,
+    h("button", { type: "button", class: "et-ajout", onclick: () => {
+      etapes.push({ id: null, nom: "", mode: "a_la_piece", temps_min: "", utilise: [], formats: Object.fromEntries((o.famille.variantes ?? []).map((v) => [v, ""])),
+        donne: o.type === "produit" ? [{ produit_id: o.produit_id, piece_id: null, quantite: 1 }] : o.type === "piece" ? [{ piece_id: o.piece.id, produit_id: null, quantite: 1 }] : [] });
+      etat.recetteFocus = `et-nom-${etapes.length - 1}`; dessinerRecettes();
+    } }, etapes.length ? "+ Ajouter une étape" : "+ Écrire la première étape")), ...manques);
 }
 
-// Liste de jetons modifiables (quantité + élément), avec un champ de recherche pour en ajouter.
-function lignesEdition(o, ed, sens) {
-  const liste = ed[sens];
-  const bloc = h("span", { class: "lignes-edition" });
-  liste.forEach((l, i) => {
-    if (i) bloc.append(" + ");
-    if (!l.piece_id && !l.produit_id) { bloc.append(selecteurElement(o, (choix) => { Object.assign(l, choix); dessinerRecettes(); }, `rc-${sens}-${i}`)); return; }
-    bloc.append(h("span", { class: "jeton" + (l.produit_id ? " var" : "") },
-      h("input", { class: "q-saisie", type: "text", inputmode: "numeric", value: String(l.quantite), "aria-label": "Quantité", oninput: (e) => { l.quantite = e.target.value; } }),
-      nomLigne(l),
-      h("button", { type: "button", class: "retirer-jeton", "aria-label": "Retirer " + nomLigne(l), onclick: () => { liste.splice(i, 1); dessinerRecettes(); } }, "×")));
-  });
-  if (!liste.some((l) => !l.piece_id && !l.produit_id))
-    bloc.append(h("button", { type: "button", class: "btn-petit", onclick: () => { liste.push({ piece_id: null, produit_id: null, quantite: 1 }); etat.recetteFocus = `rc-${sens}-${liste.length - 1}`; dessinerRecettes(); } },
-      liste.length ? "+" : sens === "utilise" ? "+ ajouter ce qu'on utilise" : "+ ajouter ce qu'on obtient"));
-  return bloc;
+// Case « On utilise » / « On obtient » : on y glisse (ou y pose) des ingrédients.
+function depot(o, e, i, sens) {
+  const liste = e[sens];
+  const etapes = etat.travail.etapes;
+  const lien = (l) => {
+    if (sens === "utilise") { const j = etapes.slice(0, i).findIndex((x) => x.donne.some((y) => memeLigne(y, l))); return j >= 0 ? `← étape ${j + 1}` : ""; }
+    const k = etapes.slice(i + 1).findIndex((x) => x.utilise.some((y) => memeLigne(y, l))); return k >= 0 ? `→ étape ${i + k + 2}` : "";
+  };
+  const d = h("div", { class: "depot" + (etat.ingChoisi ? " cible" : ""), "data-i": i, "data-sens": sens,
+    onclick: (ev) => { if (etat.ingChoisi && !ev.target.closest(".chip")) poserIngredient(o, etat.ingChoisi, i, sens); } },
+    h("span", { class: "lbl" }, sens === "utilise" ? "On utilise" : "On obtient"),
+    liste.length ? liste.flatMap((l, k) => [k ? h("span", { class: "plus", "aria-hidden": "true" }, "+") : null,
+      h("span", { class: "chip" + (l.produit_id ? " var" : "") },
+        h("input", { value: String(l.quantite), inputmode: "numeric", "aria-label": `Quantité de ${nomLigne(l)}`, onchange: (ev) => { l.quantite = ev.target.value; sauverEtape(o, e); } }),
+        nomLigne(l).replace(" · même variante", o.type === "produit" && o.famille.modele_non_precise ? " · même motif" : " · même variante"),
+        lien(l) ? h("span", { class: "lk" }, lien(l)) : null,
+        h("button", { type: "button", "aria-label": "Retirer " + nomLigne(l), onclick: () => { liste.splice(k, 1); sauverEtape(o, e); } }, "×"))])
+      : h("span", { class: "vide2" }, etat.ingChoisi ? "touchez ici pour poser l'ingrédient choisi" : "glissez un ingrédient ici"));
+  return d;
 }
 
-function selecteurElement(o, choisir, id) {
-  const saisie = h("input", { id, class: "saisie-element", placeholder: "tapez quelques lettres…", autocomplete: "off", "aria-label": "Chercher un élément" });
-  const menu = h("ul", { class: "menu-elements", role: "listbox" });
-  const options = () => {
-    const mots = sansAccent(saisie.value.trim()).split(/\s+/).filter(Boolean);
-    const ok = (t) => mots.every((m) => sansAccent(t).includes(m));
-    const pieces = piecesListe().filter((p) => ok(p.nom)).sort((a, b) => (b.famille_id === o.famille.id) - (a.famille_id === o.famille.id) || a.nom.localeCompare(b.nom));
-    const produits = o.type === "produit"
-      ? [...new Map(piecesListe().filter((p) => p.produit_id && ok(p.produit)).map((p) => [p.produit_id, p])).values()].map((p) => ({ produit_id: p.produit_id, nom: `${p.produit} · même variante`, sous: `${p.famille}, la variante qui correspond` }))
-      : [];
-    const res = [...produits, ...pieces.map((p) => ({ piece_id: p.id, nom: p.nom, sous: `${p.famille} · ${NIVEAUX[p.niveau]}` }))].slice(0, 8);
-    if (saisie.value.trim().length >= 2) {
-      res.push({ creer: "achete", nom: `+ Créer « ${saisie.value.trim()} »`, sous: "fourniture achetée" });
-      res.push({ creer: "fait_maison", nom: `+ Créer « ${saisie.value.trim()} »`, sous: "fourniture maison" });
+function depotFormats(o, e) {
+  return h("div", { class: "depot" },
+    h("span", { class: "lbl" }, "On obtient, au choix"),
+    Object.keys(e.formats).flatMap((v, k) => [k ? h("span", { class: "plus" }, "ou") : null,
+      h("span", { class: "chip var" }, h("input", { value: e.formats[v], placeholder: "–", inputmode: "numeric", "aria-label": `Combien de ${v} en une fois`,
+        onchange: (ev) => { e.formats[v] = ev.target.value; sauverEtape(o, e); } }), v)]),
+    h("span", { class: "vide2", style: "width:100%" }, "vide = ce format ne sort pas de cette étape"));
+}
+
+function poserIngredient(o, ing, i, sens) {
+  const e = etat.travail.etapes[i];
+  if (!e) return;
+  if (ing.produit_id && o.type !== "produit") { flash("Choisissez une variante précise : cherchez-la par son nom (ex. « Planchette Sauge »).", true); return; }
+  if (ing.produit_id && o.type === "produit" && ing.produit_id !== o.produit_id && !piecesListe().some((p) => p.produit_id === ing.produit_id && o.variantes.some((v) => v.variante === p.variante)))
+    flash("Attention : ce produit n'a aucune variante du même nom ; l'étape ne pourra pas être générée.", true);
+  const l = e[sens];
+  const ex = l.find((x) => memeLigne(x, ing));
+  if (ex) ex.quantite = Number(ex.quantite) + 1; else l.push({ piece_id: ing.piece_id ?? null, produit_id: ing.produit_id ?? null, quantite: 1 });
+  etat.ingChoisi = null;
+  sauverEtape(o, e);
+}
+
+async function deplacerEtape(e, sens) {
+  await tenter(async () => {
+    await api(`/recettes/${e.id}/deplacer`, { method: "POST", body: { sens } });
+    etat.recettes = await api("/recettes"); etat.travail = null; dessinerRecettes();
+  });
+}
+
+// ── Palette d'ingrédients : chercher, glisser, changer de groupe (achetée / faite maison / à vendre) ──
+const GROUPES_ING = [["achete", "Achetées"], ["fait_maison", "Faites maison"], ["a_vendre", "À vendre"]];
+function ingredientsDe(pieces) {
+  const out = [], vus = new Set();
+  for (const p of pieces) {
+    if (p.produit_id) {
+      if (vus.has(p.produit_id)) continue;
+      vus.add(p.produit_id);
+      const n = pieces.filter((x) => x.produit_id === p.produit_id).length;
+      out.push({ cle: "p" + p.produit_id, produit_id: p.produit_id, nom: p.produit, niveau: p.niveau, famille: p.famille, famille_id: p.famille_id, sous: `${n} var.` });
+    } else out.push({ cle: "a" + p.id, piece_id: p.id, nom: p.nom, niveau: p.niveau === "recup" ? "achete" : p.niveau, famille: p.famille, famille_id: p.famille_id, sous: p.niveau === "recup" ? "récup" : "" });
+  }
+  return out;
+}
+
+function palette(o) {
+  const conteneur = h("div", { class: "pal-liste" });
+  const q = h("input", { id: "pal-q", type: "search", value: etat.palQ ?? "", placeholder: "Chercher un ingrédient…", "aria-label": "Chercher un ingrédient", autocomplete: "off" });
+  q.addEventListener("input", () => { etat.palQ = q.value; remplir(); });
+  q.addEventListener("keydown", (ev) => {
+    if (ev.key !== "Enter") return;
+    ev.preventDefault();
+    const premier = conteneur.querySelector(".ing");
+    if (premier) premier.dispatchEvent(new CustomEvent("choisir"));
+  });
+  function remplir() {
+    const mots = sansAccent((etat.palQ ?? "").trim()).split(/\s+/).filter(Boolean);
+    const toutes = piecesListe();
+    if (!mots.length) {
+      const ings = ingredientsDe(toutes.filter((p) => p.famille_id === o.famille.id));
+      conteneur.replaceChildren(...GROUPES_ING.map(([niv, titre]) => h("div", { class: "pal-groupe", "data-niveau": niv },
+        h("h5", {}, titre), ...ings.filter((x) => x.niveau === niv).map((x) => tuileIng(o, x)),
+        ings.some((x) => x.niveau === niv) ? null : h("span", { class: "note", style: "font-size:12px" }, "rien encore"))));
+      return;
     }
-    return res;
-  };
-  const prendre = (x) => tenter(async () => {
-    if (x.creer) {
-      const { id: pid } = await api("/pieces", { method: "POST", body: { nom: saisie.value.trim(), famille_id: o.famille.id, niveau: x.creer, suivi: "quantite" } });
-      etat.stock = await api("/stock");
-      flash(`« ${saisie.value.trim()} » créé (${NIVEAUX[x.creer]}, famille ${o.famille.nom}).`);
-      choisir({ piece_id: pid, produit_id: null });
-    } else choisir(x.piece_id ? { piece_id: x.piece_id, produit_id: null } : { produit_id: x.produit_id, piece_id: null });
+    const ok = (t) => mots.every((m) => sansAccent(t).includes(m));
+    const trouves = ingredientsDe(toutes).filter((x) => ok(x.nom)).sort((a, b) => (b.famille_id === o.famille.id) - (a.famille_id === o.famille.id)).slice(0, 12);
+    const texte = (etat.palQ ?? "").trim();
+    const creer = texte.length >= 2 && !trouves.some((x) => sansAccent(x.nom) === sansAccent(texte))
+      ? h("div", { class: "pal-creer" }, h("b", {}, `Créer « ${texte} »`), h("span", { class: "note" }, `dans ${o.famille.nom}, comme :`),
+          h("div", { class: "pal-creer-boutons" }, GROUPES_ING.map(([niv, titre]) => h("button", { type: "button", class: "btn-petit", onclick: () => tenter(async () => {
+            await api("/pieces", { method: "POST", body: { nom: texte, famille_id: o.famille.id, niveau: niv, suivi: "quantite" } });
+            etat.stock = await api("/stock"); etat.palQ = ""; flash(`« ${texte} » ajouté (${titre.toLowerCase()}).`); dessinerRecettes();
+            queueMicrotask(() => document.getElementById("pal-q")?.focus());
+          }) }, titre))))
+      : null;
+    conteneur.replaceChildren(...trouves.map((x) => tuileIng(o, x, x.famille_id !== o.famille.id)), creer,
+      !trouves.length && !creer ? h("span", { class: "note" }, "Encore une lettre…") : null);
+  }
+  remplir();
+  return h("aside", { class: "carte et-palette" },
+    h("div", { class: "titre-pal" }, "Ingrédients"),
+    h("div", { class: "note", style: "font-size:12px" }, `Famille ${o.famille.nom}. Glissez-les dans une étape, ou touchez-en un puis une case. Glissez-les d'un groupe à l'autre pour changer leur type.`),
+    q, conteneur);
+}
+
+function tuileIng(o, x, autreFamille = false) {
+  const choisie = etat.ingChoisi?.cle === x.cle;
+  const t = h("div", { class: `ing ${x.niveau}${choisie ? " choisie" : ""}`, tabindex: "0", role: "button", "aria-label": `${x.nom} : glisser vers une étape` },
+    h("span", { class: "p" }), h("span", { class: "nom-ing" }, x.nom), h("small", {}, autreFamille ? x.famille : x.sous));
+  const choisir = () => { etat.ingChoisi = choisie ? null : x; dessinerRecettes(); };
+  t.addEventListener("choisir", choisir);
+  t.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); choisir(); } });
+  t.addEventListener("pointerdown", (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const x0 = e.clientX, y0 = e.clientY; let fant = null, cible = null;
+    const racine = document.querySelector(".rc3");
+    const bouge = (ev) => {
+      if (!fant && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
+      if (!fant) { fant = t.cloneNode(true); fant.classList.add("fantome"); document.body.append(fant); racine?.classList.add("en-glisse"); }
+      fant.style.left = ev.clientX + "px"; fant.style.top = ev.clientY + "px";
+      const c = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".depot[data-sens], .pal-groupe");
+      if (cible && cible !== c) cible.classList.remove("survol");
+      cible = c; c?.classList.add("survol");
+    };
+    const fin = () => {
+      removeEventListener("pointermove", bouge); removeEventListener("pointerup", fin); removeEventListener("pointercancel", fin);
+      racine?.classList.remove("en-glisse");
+      if (!fant) { choisir(); return; }
+      fant.remove();
+      if (!cible) return;
+      if (cible.classList.contains("pal-groupe")) changerType(x, cible.dataset.niveau);
+      else poserIngredient(o, x, Number(cible.dataset.i), cible.dataset.sens);
+    };
+    addEventListener("pointermove", bouge); addEventListener("pointerup", fin); addEventListener("pointercancel", fin);
   });
-  const remplir = () => {
-    const res = saisie.value.trim() ? options() : [];
-    menu.hidden = !res.length;
-    menu.replaceChildren(...res.map((x) => h("li", {}, h("button", { type: "button", class: x.creer ? "creer" : "", onmousedown: (e) => e.preventDefault(), onclick: () => prendre(x) },
-      h("span", {}, x.nom), h("small", {}, x.sous)))));
-  };
-  saisie.addEventListener("input", remplir);
-  saisie.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); const r = options(); if (r.length) prendre(r[0]); } });
-  menu.hidden = true;
-  return h("span", { class: "selecteur" }, saisie, menu);
+  return t;
+}
+
+async function changerType(x, niveau) {
+  if (x.niveau === niveau) return;
+  await tenter(async () => {
+    const ids = x.produit_id ? piecesListe().filter((p) => p.produit_id === x.produit_id).map((p) => p.id) : [x.piece_id];
+    for (const id of ids) await api("/pieces/" + id, { method: "PATCH", body: { niveau } });
+    etat.stock = await api("/stock");
+    flash(`« ${x.nom} » est maintenant : ${NIVEAUX[niveau].toLowerCase()}.`);
+    dessinerRecettes();
+  });
 }
 
 // ───────────── Recettes (Réglages) ─────────────
@@ -2339,7 +2416,7 @@ function lienJalon(type) {
 }
 
 window.addEventListener("hashchange", () => {
-  Object.assign(etat, { recetteEdit: null, menuLigne: null, jalonChoisi: null, achatAction: null, achatEdition: null, corrEdition: null, comptage: null, ligneEnCours: null, edition: null, editeur: null, fait: null, salonEdition: null, comptageAvant: null });
+  Object.assign(etat, { recetteEdit: null, travail: null, ingChoisi: null, palQ: "", menuLigne: null, jalonChoisi: null, achatAction: null, achatEdition: null, corrEdition: null, comptage: null, ligneEnCours: null, edition: null, editeur: null, fait: null, salonEdition: null, comptageAvant: null });
   afficher();
 });
 afficher();
