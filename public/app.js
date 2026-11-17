@@ -1121,6 +1121,7 @@ function tuileIng(o, x, autreFamille = false) {
       racine?.classList.remove("en-glisse");
       if (!fant) { choisir(); return; }
       fant.remove();
+      document.querySelectorAll(".survol").forEach((x) => x.classList.remove("survol"));
       if (!cible) return;
       if (cible.classList.contains("pal-groupe")) changerType(x, cible.dataset.niveau);
       else poserIngredient(o, x, Number(cible.dataset.i), cible.dataset.sens);
@@ -2464,7 +2465,23 @@ function lienJalon(type) {
   return l ? h("a", { href: l[0], class: "btn-petit", style: "display:inline-flex;align-items:center;text-decoration:none" }, l[1]) : null;
 }
 
+// Nouvelle version en ligne alors que la page est restée ouverte : on propose de recharger.
+let versionChargee = null;
+async function verifierVersion() {
+  try {
+    const { version } = await api("/version");
+    if (versionChargee === null) { versionChargee = version; return; }
+    if (version !== versionChargee && !document.getElementById("nouvelle-version"))
+      document.body.append(h("div", { id: "nouvelle-version", class: "nouvelle-version", role: "status" },
+        "Une nouvelle version de l'outil est en ligne. ", h("button", { class: "btn", onclick: () => location.reload() }, "Recharger")));
+  } catch {}
+}
+verifierVersion();
+setInterval(verifierVersion, 5 * 60 * 1000);
+document.addEventListener("visibilitychange", () => { if (document.visibilityState === "visible") verifierVersion(); });
+
 window.addEventListener("hashchange", () => {
+  verifierVersion();
   Object.assign(etat, { recetteEdit: null, travail: null, ingChoisi: null, palQ: "", menuLigne: null, jalonChoisi: null, achatAction: null, achatEdition: null, corrEdition: null, comptage: null, ligneEnCours: null, edition: null, editeur: null, fait: null, salonEdition: null, comptageAvant: null });
   afficher();
 });

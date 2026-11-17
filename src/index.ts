@@ -338,6 +338,9 @@ app.route("/", achats);
 app.route("/", accueil);
 app.route("/", fiches);
 
+// Version de l'interface (empreinte du script et du style) : une page restée ouverte sait qu'il faut recharger.
+app.get("/version", async (c) => c.json({ version: await empreinte((SCRIPT as string) + (STYLE as string)) }));
+
 app.onError((e, c) => {
   if (e instanceof HTTPException) return c.json({ erreur: e.message }, e.status);
   console.error(e);

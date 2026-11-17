@@ -464,3 +464,4 @@ input.compte, .formulaire input, .formulaire select, .editeur select, .editeur i
   .rc3 > .et-palette { order: 2; }
 }
 .choix-variante { width: 100%; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px; background: var(--carte); border: 1.5px solid var(--vermillon); font-size: 13px; font-weight: 600; }
+.nouvelle-version { position: fixed; right: max(16px, env(safe-area-inset-right, 0px)); bottom: calc(16px + env(safe-area-inset-bottom, 0px)); z-index: 60; display: flex; align-items: center; gap: 12px; padding: 12px 14px; background: var(--carte); border: 2px solid var(--encre); box-shadow: 4px 4px 0 var(--vermillon); font-weight: 600; }
