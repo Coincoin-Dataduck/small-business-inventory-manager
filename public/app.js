@@ -1034,9 +1034,13 @@ function palette(o) {
     const toutes = piecesListe();
     if (!mots.length) {
       const ings = ingredientsDe(toutes.filter((p) => p.famille_id === o.famille.id));
+      // Fournitures communes : familles sans article à vendre (peintures, contreplaqué…), proposées partout.
+      const communes = etat.stock.filter((f) => f.id !== o.famille.id && f.pieces.length && !f.pieces.some((p) => p.niveau === "a_vendre"));
       conteneur.replaceChildren(...GROUPES_ING.map(([niv, titre]) => h("div", { class: "pal-groupe", "data-niveau": niv },
         h("h5", {}, titre), ...ings.filter((x) => x.niveau === niv).map((x) => tuileIng(o, x)),
-        ings.some((x) => x.niveau === niv) ? null : h("span", { class: "note", style: "font-size:12px" }, "rien encore"))));
+        ings.some((x) => x.niveau === niv) ? null : h("span", { class: "note", style: "font-size:12px" }, "rien encore"))),
+        ...communes.map((f) => h("div", { class: "pal-commun" }, h("h5", {}, f.nom),
+          ...ingredientsDe(toutes.filter((p) => p.famille_id === f.id)).map((x) => tuileIng(o, x)))));
       return;
     }
     const ok = (t) => mots.every((m) => sansAccent(t).includes(m));
@@ -1056,7 +1060,7 @@ function palette(o) {
   remplir();
   return h("aside", { class: "carte et-palette" },
     h("div", { class: "titre-pal" }, "Ingrédients"),
-    h("div", { class: "note", style: "font-size:12px" }, `Famille ${o.famille.nom}. Glissez-les dans une étape, ou touchez-en un puis une case. Glissez-les d'un groupe à l'autre pour changer leur type.`),
+    h("div", { class: "note", style: "font-size:12px" }, `Famille ${o.famille.nom}, puis les fournitures communes. Glissez-les dans une étape, ou touchez-en un puis une case ; d'un groupe à l'autre pour changer leur type. La recherche couvre toutes les familles.`),
     q, conteneur);
 }
 

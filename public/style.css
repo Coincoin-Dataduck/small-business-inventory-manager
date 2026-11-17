@@ -444,3 +444,5 @@ input.compte, .formulaire input, .formulaire select, .editeur select, .editeur i
 .chip { white-space: nowrap; }
 .rc-liste .prod { flex-wrap: wrap; }
 .rc-liste .prod .etat { white-space: normal; max-width: 100%; }
+.pal-commun { display: flex; flex-direction: column; gap: 5px; padding-top: 6px; margin-top: 4px; border-top: 1px solid var(--bord); }
+.pal-commun h5 { margin: 6px 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--doux); font-weight: 700; }
