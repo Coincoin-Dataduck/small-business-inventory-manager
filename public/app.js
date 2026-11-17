@@ -770,7 +770,7 @@ async function pageRecettes() {
 function proprietaires() {
   return etat.stock.map((f) => {
     const items = [];
-    if (f.variantes?.length) items.push({ cle: "f" + f.id, type: "commune", famille: f, nom: `Tous les ${f.nom.toLowerCase()}`, sous: "au choix : " + f.variantes.join(" · ") });
+    if (f.variantes?.length) items.push({ cle: "f" + f.id, type: "commune", famille: f, nom: `Tous les ${f.nom.toLowerCase()}`, sous: f.variantes.join(" · ") + ", mélangés" });
     const vus = new Set();
     // Les fournitures maison se fabriquent dans la recette du produit fini : pas d'entrée à part (sauf recette déjà écrite).
     const aPart = (x) => x.niveau === "a_vendre" || (x.niveau === "fait_maison" && etat.recettes.some((r) => r.piece_id === x.id || (x.produit_id && r.produit_id === x.produit_id)));
@@ -899,9 +899,9 @@ function etabli(o) {
   const etapes = etat.travail.etapes;
   const st = statutRecette(o);
   const n = (l) => l.map((x) => `${x.quantite} ${nomLigne(x)}`).join(" + ") || "…";
-  const sortieTexte = (e) => (o.type === "commune" ? "au choix " + (Object.entries(e.formats).filter(([, q]) => String(q).trim()).map(([v, q]) => `${q} ${v}`).join(" ou ") || "…") : n(e.donne));
+  const sortieTexte = (e) => (o.type === "commune" ? texteFormats(e.formats) : n(e.donne));
   const vaut = o.type === "produit" ? `vaut pour ${o.variantes.length > 1 ? `les ${o.variantes.length} variantes` : "sa variante"}`
-    : o.type === "commune" ? `vaut pour tous les ${o.famille.nom.toLowerCase()} (${o.famille.variantes.join(", ")})` : o.niveau === "fait_maison" ? "fourniture maison" : "";
+    : o.type === "commune" ? `vaut pour tous les ${o.famille.nom.toLowerCase()}, formats mélangés` : o.niveau === "fait_maison" ? "fourniture maison" : "";
   const fabriqueAilleurs = st === "commune" ? fabriquePar(o.type === "produit" ? o.variantes[0] : o.piece) : null;
   const tete = h("div", { class: "et-tete" },
     h("span", { class: "sur" }, "Recette"),
@@ -982,13 +982,33 @@ function depot(o, e, i, sens) {
   return d;
 }
 
+// Recette commune (prints) : en une fois, la place pour N de chaque format ; on mélange librement.
+function exempleMelange(formats) {
+  const f = Object.entries(formats).map(([v, q]) => [v, Number(q)]).filter(([, q]) => q > 0).sort((a, b) => a[1] - b[1]);
+  if (f.length < 2) return "";
+  const pg = (a, b) => (b ? pg(b, a % b) : a);
+  const cap = f.reduce((m, [, q]) => (m / pg(m, q)) * q, 1);
+  const [grand, petit] = [f[f.length - 2], f[f.length - 1]];
+  const reste = cap - cap / grand[1];
+  const n = reste / (cap / petit[1]);
+  return Number.isInteger(n) && n > 0 ? `1 ${grand[0]} + ${n} ${petit[0]}` : "";
+}
+const texteFormats = (formats) => {
+  const f = Object.entries(formats).filter(([, q]) => String(q).trim());
+  if (!f.length) return "…";
+  const ex = exempleMelange(formats);
+  return "la place pour " + f.map(([v, q]) => `${q} ${v}`).join(", ou ") + (ex ? ` (mélange possible, ex. ${ex})` : "");
+};
 function depotFormats(o, e) {
+  const ex = exempleMelange(e.formats);
   return h("div", { class: "depot" },
-    h("span", { class: "lbl" }, "On obtient, au choix"),
+    h("span", { class: "lbl" }, "On obtient la place pour"),
     Object.keys(e.formats).flatMap((v, k) => [k ? h("span", { class: "plus" }, "ou") : null,
-      h("span", { class: "chip var" }, h("input", { value: e.formats[v], placeholder: "–", inputmode: "numeric", "aria-label": `Combien de ${v} en une fois`,
+      h("span", { class: "chip var" }, h("input", { value: e.formats[v], placeholder: "–", inputmode: "numeric", "aria-label": `Combien de ${v} tiennent en une fois`,
         onchange: (ev) => { e.formats[v] = ev.target.value; sauverEtape(o, e); } }), v)]),
-    h("span", { class: "vide2", style: "width:100%" }, "vide = ce format ne sort pas de cette étape"));
+    h("span", { class: "vide2", style: "width:100%" },
+      (ex ? `On mélange comme on veut tant que ça tient : par exemple ${ex} sur la même feuille. ` : "On mélange les formats comme on veut tant que ça tient. ")
+      + "Vide = ce format ne sort pas de cette étape."));
 }
 
 function poserIngredient(o, ingDepart, i, sens) {
