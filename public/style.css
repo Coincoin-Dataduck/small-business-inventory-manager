@@ -468,3 +468,5 @@ input.compte, .formulaire input, .formulaire select, .editeur select, .editeur i
 .chip.implicite { border-style: dashed; font-weight: 500; }
 .de-quoi { width: 100%; display: flex; flex-wrap: wrap; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; }
 .et-ajouts { display: flex; flex-direction: column; }
+.variante-form { gap: 8px; flex-wrap: wrap; cursor: default; }
+.variante-form input { flex: 1 1 140px; min-height: 34px; border: 1.5px solid var(--encre); padding: 0 8px; font: inherit; }

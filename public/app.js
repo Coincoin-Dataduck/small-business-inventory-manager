@@ -478,6 +478,43 @@ function panneauRecherche() {
     const m = sansAccent(c.recherche.trim()).split(/\s+/).filter(Boolean);
     return m.length ? candidats.filter((p) => m.every((x) => sansAccent(p.nom).includes(x))).slice(0, 8) : [];
   };
+  // Une variante qui manque à un produit existant (« baleine a2 » → ajouter A2 à Baleine).
+  const ajouterVariante = (produit_id, nomProduit, variante) => tenter(async () => {
+    let v = variante.trim();
+    if (!v) return;
+    // Même écriture que les variantes connues (« a2 » → « A2 » comme A3, A4…).
+    const connues = [...piecesListe().map((p) => p.variante), ...etat.stock.flatMap((f) => f.variantes ?? [])].filter(Boolean);
+    v = connues.find((x) => sansAccent(x) === sansAccent(v)) ?? (/^[a-z]\d+$/i.test(v) ? v.toUpperCase() : v);
+    const { id } = await api(`/produits/${produit_id}/variantes`, { method: "POST", body: { variante: v } });
+    etat.stock = await api("/stock");
+    flash(`« ${nomProduit} ${v} » ajouté : comptez-le.`);
+    c.recherche = ""; c.creation = null; c.choisi = id; c.focus = "q-choisi";
+    dessinerStock();
+  });
+  function suggestionsVariante(texte, resultats) {
+    const mots = texte.trim().split(/\s+/).filter(Boolean);
+    if (!mots.length) return [];
+    const produits = [...new Map(piecesListe().filter((p) => p.produit_id && filtreOk(p)).map((p) => [p.produit_id, p])).values()];
+    const out = [];
+    for (const p of produits) {
+      const nomP = sansAccent(p.produit);
+      let k = 0;
+      while (k < mots.length && nomP.includes(sansAccent(mots[k]))) k++;
+      if (!k) continue;
+      const reste = mots.slice(k).join(" ");
+      const variantes = piecesListe().filter((x) => x.produit_id === p.produit_id).map((x) => sansAccent(x.variante ?? ""));
+      if (reste && variantes.includes(sansAccent(reste))) continue; // existe déjà : elle est dans les résultats
+      out.push(reste
+        ? h("button", { type: "button", class: "resultat creer", onclick: () => ajouterVariante(p.produit_id, p.produit, reste) },
+            h("b", {}, `+ Ajouter « ${p.produit} ${reste} »`), h("span", { class: "note" }, `nouvelle variante de ${p.produit}`))
+        : h("form", { class: "resultat creer variante-form", onsubmit: (e) => { e.preventDefault(); ajouterVariante(p.produit_id, p.produit, e.target.elements.v.value); } },
+            h("b", {}, `+ Autre variante de ${p.produit} :`),
+            h("input", { name: "v", placeholder: "ex. A2, Hérisson…", "aria-label": `Nouvelle variante de ${p.produit}`, autocomplete: "off" }),
+            h("button", { class: "btn-petit" }, "Ajouter")));
+      if (out.length >= 3) break;
+    }
+    return out;
+  }
   const ouvrirCreation = () => {
     const derniere = c.ordre.length ? pieceDe(c.ordre[0])?.famille_id : null;
     const famille = etat.filtre ?? derniere ?? etat.stock[0].id;
@@ -491,6 +528,7 @@ function panneauRecherche() {
       ...r.map((p) => h("button", { type: "button", class: "resultat" + (valeurSession(p) !== undefined ? " fait" : ""), onclick: () => choisir(p) },
         h("span", {}, h("b", {}, p.nom), h("small", {}, `${p.famille} · ${NIVEAUX[p.niveau]}`)),
         h("span", { class: "note" }, valeurSession(p) !== undefined ? `compté ${valeurSession(p)}` : `attendu ${p.stock}`))),
+      ...suggestionsVariante(c.recherche, r),
       c.recherche.trim().length >= 2 && !r.some((p) => sansAccent(p.nom) === sansAccent(c.recherche.trim()))
         ? h("button", { type: "button", class: "resultat creer", onclick: ouvrirCreation }, h("b", {}, `+ Créer « ${c.recherche.trim()} »`), h("span", { class: "note" }, "il manque dans la liste")) : null,
       c.recherche.trim() && !r.length && c.recherche.trim().length < 2 ? h("span", { class: "note" }, "Encore une lettre…") : null].filter(Boolean));
