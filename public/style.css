@@ -239,3 +239,40 @@ input.compte, .formulaire input, .formulaire select, .editeur select, .editeur i
   .barre-comptage { margin: 0 -16px; box-shadow: none; border-width: 2px 0 0; }
   .barre-comptage .progression { max-width: none; flex-basis: 100%; }
 }
+
+/* Stock : filtres famille + type, ajout en ligne, comptage par recherche */
+.filtres-stock { display: flex; flex-direction: column; gap: 8px; }
+.tbl tr.ajout td { padding: 8px 12px 12px; border-bottom: 0; }
+.ajout-ligne { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.ajout-ligne input:not(.compte) { flex: 1 1 220px; min-height: 36px; border: 1.5px dashed var(--doux); border-radius: 2px; padding: 0 10px; background: var(--fond-doux); }
+.ajout-ligne input:not(.compte):focus { border-style: solid; border-color: var(--encre); background: #fff; }
+.ajout-ligne select { min-height: 36px; border: 1.5px solid var(--encre); border-radius: 2px; background: #fff; padding: 0 6px; }
+.ecart.juste { color: var(--doux); font-weight: 600; }
+.panneau-recherche { padding: 14px; display: flex; flex-direction: column; gap: 10px; overflow: visible; }
+.panneau-recherche input[type=search] { min-height: 52px; border: 2px solid var(--encre); border-radius: 2px; padding: 0 14px; font-size: 18px; background: #fff; }
+.resultats { display: flex; flex-direction: column; gap: 6px; }
+.resultat { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 10px 12px; border: 2px solid var(--encre); border-radius: 2px; background: var(--carte); text-align: left; cursor: pointer; font: inherit; color: inherit; }
+.resultat:hover, .resultat:focus-visible { background: var(--fond-doux); }
+.resultat b { display: block; }
+.resultat small { color: var(--doux); }
+.resultat.fait { box-shadow: inset 6px 0 0 var(--vert); }
+.resultat.creer { border-style: dashed; }
+.saisie-choisi { display: flex; flex-direction: column; gap: 10px; padding: 12px; border: 2px solid var(--encre); background: var(--fond-doux); }
+.saisie-choisi input.compte { width: 90px; min-height: 44px; font-family: var(--f-titre); font-size: 20px; text-align: right; border-width: 2px; }
+.saisie-choisi .ligne-editeur input:not(.compte) { min-height: 40px; flex: 1 1 200px; }
+.saisie-choisi .actions-ligne { justify-content: flex-start; }
+.pas-comptes summary { list-style: none; }
+.liste-restants { display: flex; flex-direction: column; gap: 10px; padding: 0 14px 14px; }
+.puces { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.en-comptage input.compte { width: 64px; }
+@media (max-width: 760px) {
+  .ajout-ligne select { flex: 1 1 auto; }
+  .en-comptage .tbl-stock tr.ajout { display: block; border: 0; padding: 0; margin: 4px 10px; }
+  .en-comptage .tbl-stock tr.ajout td { display: block; }
+  .en-comptage .tbl-stock .actions-ligne { flex-wrap: wrap; justify-content: flex-end; }
+}
+.ajout-ligne input.compte { width: 96px; }
+@media (max-width: 760px) {
+  .filtres-stock .filtres { flex-wrap: nowrap; overflow-x: auto; padding-bottom: 4px; }
+  .filtres-stock .pastille-filtre { white-space: nowrap; }
+}

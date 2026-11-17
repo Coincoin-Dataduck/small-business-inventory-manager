@@ -58,7 +58,7 @@ function signe(n) { return n > 0 ? "+" + n : String(n); }
 
 // ───────────── Navigation ─────────────
 const etat = {
-  page: "stock", filtre: null, comptage: null, ligneEnCours: null, stock: [], familles: [], edition: null,
+  page: "stock", filtre: null, filtreType: null, depuis: null, comptage: null, ligneEnCours: null, stock: [], familles: [], edition: null,
   etapes: [], editeur: null, fait: null, faites: [],
   questions: [], nbQuestions: null, import: null, correspondances: [], corrEdition: null,
   params: [], salons: null, salonEdition: null, objectifs: null, plan: null, comptageAvant: null,
@@ -111,193 +111,361 @@ function entete(titre, action) {
 }
 
 // ───────────── Stock ─────────────
+// Comptage : etat.comptage = { valeurs: { [id]: quantité confirmée }, ordre: [ids, le plus récent d'abord],
+//   mode: "chercher" | "liste", recherche, choisi, creation, pasComptes, focus }.
+// Une case affiche toujours un chiffre (l'attendu, ou ce qui a déjà été compté). « 12 » remplace,
+// « +5 » / « -2 » ajoute ou retire au chiffre de la case. Entrée ou ✓ = compté.
 async function pageStock() {
-  etat.stock = await api("/stock");
+  const [stock, ce] = await Promise.all([api("/stock"), api("/comptages/etat")]);
+  etat.stock = stock; etat.depuis = ce.depuis;
   // Comptage avant une préparation : #stock/avant/<premier salon>
   if (etat.params[0] === "avant" && etat.params[1] && etat.comptage === null) {
     const salons = await api("/salons");
     const prep = salons.preparations.find((p) => p.id === Number(etat.params[1]));
     if (prep) {
       etat.comptageAvant = { salon_id: prep.id, nom: nomPreparation(prep, salons.salons) };
-      etat.comptage = {};
+      etat.filtreType = "a_vendre";
+      demarrerComptage();
     }
   }
   dessinerStock();
 }
 
+const sansAccent = (t) => t.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
+const estComptable = (p) => p.suivi === "quantite";
+const piecesListe = () => etat.stock.flatMap((f) => f.pieces.map((p) => ({ ...p, famille: f.nom })));
+const pieceDe = (id) => piecesListe().find((p) => p.id === id);
+const filtreOk = (p) => (etat.filtre === null || p.famille_id === etat.filtre) && (!etat.filtreType || p.niveau === etat.filtreType);
+const valeurSession = (p) => etat.comptage?.valeurs[p.id];
+const valeurCase = (p) => valeurSession(p) ?? p.stock;
+const compteRecemment = (p) => !!p.dernier_comptage && (!etat.depuis || p.dernier_comptage >= etat.depuis);
+const dejaCompte = (p) => valeurSession(p) !== undefined || compteRecemment(p);
+
+function lireSaisie(texte, base) {
+  const t = String(texte).replace(/\s/g, "");
+  let m;
+  if ((m = /^([+-])(\d+)$/.exec(t))) {
+    const r = m[1] === "+" ? base + Number(m[2]) : base - Number(m[2]);
+    if (r < 0) throw new Error(`${base} ${m[1]} ${m[2]} donne ${r} : impossible de compter moins de 0.`);
+    return r;
+  }
+  if (/^\d+$/.test(t)) return Number(t);
+  throw new Error(`« ${texte} » : tapez un nombre (12), ou +5 / -2 pour ajouter ou retirer.`);
+}
+
+function confirmer(p, valeur) {
+  const c = etat.comptage;
+  c.valeurs[p.id] = valeur;
+  c.ordre = [p.id, ...c.ordre.filter((x) => x !== p.id)];
+}
+function retirer(p) {
+  delete etat.comptage.valeurs[p.id];
+  etat.comptage.ordre = etat.comptage.ordre.filter((x) => x !== p.id);
+}
+
 function piecesVisibles() {
-  return etat.stock.filter((f) => etat.filtre === null || f.id === etat.filtre);
+  return etat.stock.filter((f) => etat.filtre === null || f.id === etat.filtre)
+    .map((f) => ({ ...f, pieces: f.pieces.filter((p) => !etat.filtreType || p.niveau === etat.filtreType) }));
 }
 
 function dessinerStock() {
-  const enComptage = etat.comptage !== null;
-  entete(etat.comptageAvant ? "Comptage avant · " + etat.comptageAvant.nom : "Stock",
-    enComptage ? null : h("button", { class: "btn", onclick: demarrerComptage }, "Faire un comptage"));
+  const c = etat.comptage, enComptage = c !== null;
+  entete(etat.comptageAvant ? "Comptage avant · " + etat.comptageAvant.nom : enComptage ? "Comptage" : "Stock",
+    enComptage ? null : h("button", { class: "btn", onclick: () => { demarrerComptage(); dessinerStock(); } }, "Faire un comptage"));
   const page = document.getElementById("page");
 
   if (!etat.stock.length) {
-    page.replaceChildren(
-      h("div", { class: "carte" }, h("div", { class: "vide" }, "Aucune famille pour l'instant. Commencez par ",
-        h("a", { href: "#reglages" }, "Réglages"), " pour créer les familles, les articles et les fournitures.")),
-    );
+    page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" },
+      h("div", { class: "carte" }, h("div", { class: "vide" }, "Aucune famille pour l'instant. Créez la première :")), formNouvelleFamille()));
     return;
   }
 
-  const filtres = h("div", { class: "filtres" },
-    [{ id: null, nom: "Toutes" }, ...etat.stock].map((f) =>
-      h("button", {
-        class: "pastille-filtre",
-        "aria-pressed": String(etat.filtre === f.id),
-        disabled: enComptage,
-        onclick: () => { etat.filtre = f.id; dessinerStock(); },
-      }, f.nom),
-    ),
-  );
+  const pastille = (actif, texte, onclick) => h("button", { class: "pastille-filtre", "aria-pressed": String(actif), onclick }, texte);
+  const filtres = h("div", { class: "filtres-stock" },
+    h("div", { class: "filtres" }, [{ id: null, nom: "Toutes les familles" }, ...etat.stock].map((f) =>
+      pastille(etat.filtre === f.id, f.nom, () => { etat.filtre = f.id; dessinerStock(); }))),
+    h("div", { class: "filtres" }, [[null, "Tous les types"], ...Object.entries(NIVEAUX)].map(([k, v]) =>
+      pastille((etat.filtreType ?? null) === k, v, () => { etat.filtreType = k; dessinerStock(); }))));
 
-  const legende = h("div", { class: "legende" },
-    h("span", {}, h("span", { class: "badge badge-a_vendre" }, "À vendre"), " prêt pour le stand"),
-    h("span", {}, h("span", { class: "badge badge-fait_maison" }, "Fourniture maison"), " préparée d'avance, en réserve"),
-    h("span", {}, h("span", { class: "badge badge-achete" }, "Fourniture achetée"), " ou récup"),
-  );
+  let corps;
+  if (enComptage) {
+    const modes = h("div", { class: "filtres" },
+      pastille(c.mode === "chercher", "Chercher un article", () => { c.mode = "chercher"; dessinerStock(); }),
+      pastille(c.mode === "liste", "Suivre la liste", () => { c.mode = "liste"; dessinerStock(); }),
+      c.mode === "liste" ? h("label", { class: "ligne-editeur note", style: "margin-left:8px" },
+        h("input", { type: "checkbox", checked: c.pasComptes, onchange: (e) => { c.pasComptes = e.target.checked; dessinerStock(); } }),
+        "seulement ce qui n'est pas encore compté") : null);
+    corps = [modes, ...(c.mode === "chercher" ? panneauRecherche() : cartesFamilles()), barreComptage()];
+  } else {
+    corps = [...cartesFamilles(), formNouvelleFamille()];
+  }
+  page.replaceChildren(h("div", { class: "stock" + (enComptage ? " en-comptage" : ""), style: "display:flex;flex-direction:column;gap:18px" }, filtres, ...corps));
 
-  const cartes = piecesVisibles().map((f) =>
-    h("section", { class: "carte" },
-      h("h2", {}, f.nom),
-      f.pieces.length
-        ? h("table", { class: "tbl tbl-stock" },
-            h("colgroup", {}, h("col", { class: "c-badge" }), h("col", {}), h("col", { class: "c-qte" }), h("col", { class: "c-note" }), h("col", { class: "c-action" })),
-            h("tbody", {}, lignesFamille(f.pieces)))
-        : h("div", { class: "vide" }, "Rien dans cette famille pour l'instant."),
-    ),
-  );
-
-  const barre = enComptage ? barreComptage() : null;
-  page.replaceChildren(h("div", { class: "stock" + (enComptage ? " en-comptage" : ""), style: "display:flex;flex-direction:column;gap:18px" }, filtres, legende, ...cartes, barre));
+  // Après une saisie : la case suivante (liste) ou la recherche (chercher) reprend le clavier.
+  const f = c?.focus; if (c) c.focus = null;
+  if (f) queueMicrotask(() => { const el = document.getElementById(f); if (el) { el.focus(); el.select?.(); } });
 }
 
-// Dans une famille : les articles à vendre d'abord, puis les fournitures (maison, achetées, récup).
-function lignesFamille(pieces) {
+function cartesFamilles() {
+  const c = etat.comptage;
+  return piecesVisibles().map((f) => {
+    const pieces = c?.mode === "liste" && c.pasComptes ? f.pieces.filter((p) => estComptable(p) && !dejaCompte(p)) : f.pieces;
+    if (c?.mode === "liste" && c.pasComptes && !pieces.length) return null;
+    return h("section", { class: "carte" },
+      h("h2", {}, f.nom),
+      h("table", { class: "tbl tbl-stock" },
+        h("colgroup", {}, h("col", { class: "c-badge" }), h("col", {}), h("col", { class: "c-qte" }), h("col", { class: "c-note" }), h("col", { class: "c-action" })),
+        h("tbody", {}, lignesFamille(f, pieces))));
+  });
+}
+
+// Dans une famille : les articles à vendre d'abord, puis les fournitures ; une ligne « + Ajouter » sous chaque groupe.
+function lignesFamille(f, pieces) {
   const vente = pieces.filter((p) => p.niveau === "a_vendre"), fournitures = pieces.filter((p) => p.niveau !== "a_vendre");
-  if (!vente.length || !fournitures.length) return pieces.map(ligneStock);
   const titre = (t) => h("tr", { class: "groupe" }, h("td", { colspan: 5 }, t));
-  return [titre("À vendre"), ...vente.map(ligneStock), titre("Fournitures"), ...fournitures.map(ligneStock)];
+  const lignes = [];
+  if (vente.length && fournitures.length) {
+    lignes.push(titre("À vendre"), ...vente.map(ligneStock), ligneAjout(f, "a_vendre"), titre("Fournitures"), ...fournitures.map(ligneStock), ligneAjout(f, "achete"));
+  } else {
+    lignes.push(...pieces.map(ligneStock));
+    if (!pieces.length) lignes.push(h("tr", {}, h("td", { colspan: 5, class: "note" }, "Rien ici pour l'instant.")));
+    lignes.push(ligneAjout(f, etat.filtreType ?? (fournitures.length ? "achete" : "a_vendre")));
+    // Famille qui n'a qu'un des deux groupes : de quoi ajouter l'autre (hors filtre « pas encore comptés »).
+    const tout = !etat.filtreType && !(etat.comptage?.pasComptes && etat.comptage.mode === "liste");
+    if (tout && !f.pieces.some((p) => p.niveau === "a_vendre")) lignes.push(ligneAjout(f, "a_vendre", true));
+    if (tout && !f.pieces.some((p) => p.niveau !== "a_vendre")) lignes.push(ligneAjout(f, "achete", true));
+  }
+  return lignes;
+}
+
+// Ajouter un article ou une fourniture sans quitter le Stock (ni le comptage) ; la quantité tapée est son premier comptage.
+function ligneAjout(f, niveau, secondaire = false) {
+  const idNom = `aj-${f.id}-${niveau}${secondaire ? "-2" : ""}`;
+  const nom = h("input", { id: idNom, placeholder: niveau === "a_vendre" ? "+ ajouter un article à vendre" : "+ ajouter une fourniture", "aria-label": `Nom (${f.nom})`, autocomplete: "off" });
+  const type = h("select", { "aria-label": "Type" }, Object.entries(NIVEAUX).map(([k, v]) => h("option", { value: k, selected: k === niveau }, v)));
+  const qte = h("input", { class: "compte", type: "text", inputmode: "numeric", placeholder: "combien ?", "aria-label": "Combien en avez-vous ?" });
+  const form = h("form", { class: "ajout-ligne", onsubmit: (e) => { e.preventDefault(); tenter(async () => {
+    if (!nom.value.trim()) { nom.focus(); return; }
+    const quantite = qte.value.trim() === "" ? null : lireSaisie(qte.value, 0);
+    const { id } = await api("/pieces", { method: "POST", body: { nom: nom.value, famille_id: f.id, niveau: type.value, suivi: "quantite" } });
+    if (etat.comptage) {
+      etat.stock = await api("/stock");
+      if (quantite !== null) confirmer(pieceDe(id), quantite);
+      flash(`« ${nom.value.trim()} » ajouté${quantite !== null ? `, compté ${quantite}` : ""}.`);
+      etat.comptage.focus = idNom;
+      dessinerStock();
+    } else {
+      if (quantite !== null) await api("/comptages", { method: "POST", body: { lignes: [{ piece_id: id, compte: quantite }] } });
+      flash(`« ${nom.value.trim()} » ajouté${quantite !== null ? ` avec ${quantite} en stock` : " (stock à 0, à compter)"}.`);
+      await pageStock();
+      queueMicrotask(() => document.getElementById(idNom)?.focus());
+    }
+  }); } }, nom, type, qte, h("button", { class: "btn-petit" }, "Ajouter"));
+  return h("tr", { class: "ajout" }, h("td", { colspan: 5 }, form));
+}
+
+function formNouvelleFamille() {
+  const nom = h("input", { id: "nouvelle-famille", placeholder: "ex. Badges", "aria-label": "Nom de la nouvelle famille" });
+  return h("form", { class: "ligne-editeur", onsubmit: (e) => { e.preventDefault(); tenter(async () => {
+    await api("/familles", { method: "POST", body: { nom: nom.value, ordre: etat.stock.length } });
+    flash("Famille ajoutée.");
+    await pageStock();
+  }); } }, nom, h("button", { class: "btn-sec" }, "+ Nouvelle famille"));
 }
 
 function noteStock(p) {
   const notes = [];
   if (p.fin_de_serie) notes.push("Fin de série");
   if (p.suivi === "sans_quantite") notes.push(p.presque_vide ? "Pot presque vide" : "Sans quantité");
-  if (p.suivi === "generique") notes.push("Ventes comptées, pas de stock");
   if (p.suivi === "quantite" && p.stock < 0) notes.push("Négatif : à compter");
+  if (p.suivi === "quantite") notes.push(p.dernier_comptage ? "compté le " + fmtDate(p.dernier_comptage) : "jamais compté");
   return notes.join(" · ");
 }
 
+// Case de comptage : préremplie, « 12 » / « +5 » / « -2 », Entrée = compté.
+function caseComptage(p, id, apres) {
+  const base = valeurCase(p);
+  const input = h("input", { id, class: "compte", type: "text", inputmode: "text", enterkeyhint: "done", autocomplete: "off", value: String(base), "aria-label": "Compté pour " + p.nom });
+  const valider = (v) => tenter(async () => { confirmer(p, v); apres(); });
+  input.addEventListener("focus", () => input.select());
+  input.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") { e.preventDefault(); tenter(async () => valider(lireSaisie(input.value, base))); }
+    if (e.key === "Escape") { input.value = String(base); input.blur(); }
+  });
+  return h("div", { class: "actions-ligne" },
+    input,
+    h("button", { class: "btn-petit", type: "button", title: "Compté (le chiffre de la case est juste)", onclick: () => tenter(async () => valider(lireSaisie(input.value, base))) }, "✓"),
+    h("button", { class: "btn-petit", type: "button", title: "Compté : il n'y en a pas", onclick: () => valider(0) }, "0"),
+    valeurSession(p) !== undefined ? h("button", { class: "btn-petit", type: "button", title: "Pas compté finalement", onclick: () => { retirer(p); dessinerStock(); } }, "↺") : null);
+}
+
 function ligneStock(p) {
-  const comptable = p.suivi === "quantite";
-  const qte = comptable ? p.stock : "—";
+  const comptable = estComptable(p);
+  const c = etat.comptage;
   let action = null;
 
-  if (etat.comptage !== null && comptable) {
-    const saisi = etat.comptage[p.id];
-    const ecart = saisi === undefined || saisi === "" ? null : Number(saisi) - p.stock;
-    const ecartEl = h("span", { class: "ecart" + (ecart > 0 ? " plus" : "") }, ecart ? signe(ecart) : "");
-    action = h("div", { class: "actions-ligne" },
-      h("label", { class: "sr", for: "c" + p.id }, "Compté pour " + p.nom),
-      h("input", {
-        id: "c" + p.id, class: "compte", type: "number", min: "0", step: "1", inputmode: "numeric",
-        placeholder: String(p.stock), value: saisi ?? "",
-        oninput: (e) => {
-          etat.comptage[p.id] = e.target.value;
-          e.target.closest("tr")?.classList.toggle("compte-fait", e.target.value !== "");
-          const d = e.target.value === "" ? 0 : Number(e.target.value) - p.stock;
-          ecartEl.textContent = d ? signe(d) : "";
-          ecartEl.className = "ecart" + (d > 0 ? " plus" : "");
-          majBarreComptage();
-        },
-      }),
-      ecartEl,
-    );
-  } else if (etat.ligneEnCours === p.id) {
-    const input = h("input", { id: "l" + p.id, class: "compte", type: "number", min: "0", step: "1", inputmode: "numeric", placeholder: String(p.stock) });
+  if (c && comptable) {
+    const id = "c" + p.id;
+    action = h("div", { class: "actions-ligne" }, caseComptage(p, id, () => {
+      // Case suivante dans la liste affichée.
+      const ids = [...document.querySelectorAll(".tbl-stock input.compte[id^='c']")].map((e) => e.id);
+      c.focus = ids[ids.indexOf(id) + 1] ?? null;
+      dessinerStock();
+    }), ecartTexte(p));
+  } else if (!c && etat.ligneEnCours === p.id) {
+    const input = h("input", { id: "l" + p.id, class: "compte", type: "text", inputmode: "text", value: String(p.stock), "aria-label": "Combien de " + p.nom + " en avez-vous vraiment ?" });
     const valider = () => tenter(async () => {
-      if (input.value === "") return;
-      await enregistrerComptage([{ piece_id: p.id, compte: Number(input.value) }]);
+      await enregistrerComptage([{ piece_id: p.id, compte: lireSaisie(input.value, p.stock) }]);
       etat.ligneEnCours = null;
       await pageStock();
     });
     input.addEventListener("keydown", (e) => { if (e.key === "Enter") valider(); if (e.key === "Escape") { etat.ligneEnCours = null; dessinerStock(); } });
-    action = h("div", { class: "actions-ligne" },
-      h("label", { class: "sr", for: "l" + p.id }, "Combien de " + p.nom + " en avez-vous vraiment ?"),
-      input,
+    action = h("div", { class: "actions-ligne" }, input,
       h("button", { class: "btn-petit", onclick: valider }, "OK"),
-      h("button", { class: "btn-petit", onclick: () => { etat.ligneEnCours = null; dessinerStock(); } }, "Annuler"),
-    );
-    queueMicrotask(() => input.focus());
-  } else if (comptable && etat.comptage === null) {
+      h("button", { class: "btn-petit", onclick: () => { etat.ligneEnCours = null; dessinerStock(); } }, "Annuler"));
+    queueMicrotask(() => { input.focus(); input.select(); });
+  } else if (!c && comptable) {
+    action = h("div", { class: "actions-ligne" }, h("button", { class: "btn-petit", onclick: () => { etat.ligneEnCours = p.id; dessinerStock(); } }, "Compter"));
+  } else if (!c && p.suivi === "sans_quantite") {
     action = h("div", { class: "actions-ligne" },
-      h("button", { class: "btn-petit", onclick: () => { etat.ligneEnCours = p.id; dessinerStock(); } }, "Compter"));
-  } else if (p.suivi === "sans_quantite" && etat.comptage === null) {
-    action = h("div", { class: "actions-ligne" },
-      h("button", {
-        class: "btn-petit",
-        onclick: () => tenter(async () => {
-          await api("/pieces/" + p.id, { method: "PATCH", body: { presque_vide: !p.presque_vide } });
-          await pageStock();
-        }),
-      }, p.presque_vide ? "Pot remplacé" : "Pot presque vide"));
+      h("button", { class: "btn-petit", onclick: () => tenter(async () => {
+        await api("/pieces/" + p.id, { method: "PATCH", body: { presque_vide: !p.presque_vide } });
+        await pageStock();
+      }) }, p.presque_vide ? "Pot remplacé" : "Pot presque vide"));
   }
 
-  const compte = etat.comptage !== null && comptable && (etat.comptage[p.id] ?? "") !== "";
+  const compte = c && comptable && valeurSession(p) !== undefined;
   return h("tr", { class: compte ? "compte-fait" : null },
     h("td", { class: "col-badge" }, h("span", { class: "badge badge-" + p.niveau }, NIVEAUX[p.niveau])),
-    h("td", { style: "font-weight:600" }, p.nom, etat.comptage !== null && comptable ? h("small", { class: "attendu" }, "attendu " + p.stock) : null),
-    h("td", { class: "num qte" + (comptable && p.stock < 0 ? " neg" : comptable && p.stock === 0 ? " zero" : "") }, qte),
+    h("td", { style: "font-weight:600" }, p.nom, c && comptable ? h("small", { class: "attendu" }, "attendu " + p.stock) : null),
+    h("td", { class: "num qte" + (comptable && p.stock < 0 ? " neg" : comptable && p.stock === 0 ? " zero" : "") }, comptable ? p.stock : "—"),
     h("td", { class: "note" }, noteStock(p)),
     h("td", { class: "col-action" }, action),
   );
 }
 
+function ecartTexte(p) {
+  const v = valeurSession(p);
+  if (v === undefined) return h("span", { class: "ecart" });
+  const d = v - p.stock;
+  return h("span", { class: "ecart" + (d > 0 ? " plus" : d === 0 ? " juste" : "") }, d ? signe(d) : "juste");
+}
+
+// Mode « Chercher » : on part de l'objet qu'on a en main.
+function panneauRecherche() {
+  const c = etat.comptage;
+  const candidats = piecesListe().filter((p) => estComptable(p) && filtreOk(p));
+  const choisi = c.choisi ? pieceDe(c.choisi) : null;
+
+  const choisir = (p) => { c.choisi = p.id; c.creation = null; c.focus = "q-choisi"; dessinerStock(); };
+  const recherche = h("input", { id: "q-recherche", type: "search", value: c.recherche, placeholder: "Tapez quelques lettres : « gren caf », « buvard »…", "aria-label": "Chercher un article", autocomplete: "off" });
+  recherche.addEventListener("input", (e) => { c.recherche = e.target.value; c.choisi = null; c.creation = null; dessinerResultats(); });
+  recherche.addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    const premiers = resultatsCourants();
+    if (premiers.length) choisir(premiers[0]);
+    else if (c.recherche.trim()) ouvrirCreation();
+  });
+  const zoneResultats = h("div", { class: "resultats" });
+  const resultatsCourants = () => {
+    const m = sansAccent(c.recherche.trim()).split(/\s+/).filter(Boolean);
+    return m.length ? candidats.filter((p) => m.every((x) => sansAccent(p.nom).includes(x))).slice(0, 8) : [];
+  };
+  const ouvrirCreation = () => {
+    const derniere = c.ordre.length ? pieceDe(c.ordre[0])?.famille_id : null;
+    c.creation = { nom: c.recherche.trim(), famille: etat.filtre ?? derniere ?? etat.stock[0].id, niveau: etat.filtreType ?? "a_vendre" };
+    c.focus = "q-creation-qte";
+    dessinerStock();
+  };
+  function dessinerResultats() {
+    const r = resultatsCourants();
+    zoneResultats.replaceChildren(...[
+      ...r.map((p) => h("button", { type: "button", class: "resultat" + (valeurSession(p) !== undefined ? " fait" : ""), onclick: () => choisir(p) },
+        h("span", {}, h("b", {}, p.nom), h("small", {}, `${p.famille} · ${NIVEAUX[p.niveau]}`)),
+        h("span", { class: "note" }, valeurSession(p) !== undefined ? `compté ${valeurSession(p)}` : `attendu ${p.stock}`))),
+      c.recherche.trim().length >= 2 && !r.some((p) => sansAccent(p.nom) === sansAccent(c.recherche.trim()))
+        ? h("button", { type: "button", class: "resultat creer", onclick: ouvrirCreation }, h("b", {}, `+ Créer « ${c.recherche.trim()} »`), h("span", { class: "note" }, "il manque dans la liste")) : null,
+      c.recherche.trim() && !r.length && c.recherche.trim().length < 2 ? h("span", { class: "note" }, "Encore une lettre…") : null].filter(Boolean));
+  }
+  dessinerResultats();
+
+  let zoneSaisie = null;
+  if (choisi) {
+    zoneSaisie = h("div", { class: "saisie-choisi" },
+      h("div", {}, h("b", {}, choisi.nom), h("div", { class: "note" }, `${choisi.famille} · attendu ${choisi.stock}` + (valeurSession(choisi) !== undefined ? ` · déjà compté ${valeurSession(choisi)} (tapez +5 pour ajouter)` : ""))),
+      caseComptage(choisi, "q-choisi", () => { c.choisi = null; c.recherche = ""; c.focus = "q-recherche"; dessinerStock(); }),
+      h("button", { type: "button", class: "btn-petit", onclick: () => { c.choisi = null; c.focus = "q-recherche"; dessinerStock(); } }, "Annuler"));
+  } else if (c.creation) {
+    const cr = c.creation;
+    const nom = h("input", { value: cr.nom, "aria-label": "Nom du nouvel article", oninput: (e) => { cr.nom = e.target.value; } });
+    const fam = h("select", { "aria-label": "Famille", onchange: (e) => { cr.famille = Number(e.target.value); } },
+      etat.stock.map((f) => h("option", { value: String(f.id), selected: f.id === cr.famille }, f.nom)));
+    const type = h("select", { "aria-label": "Type", onchange: (e) => { cr.niveau = e.target.value; } },
+      Object.entries(NIVEAUX).map(([k, v]) => h("option", { value: k, selected: k === cr.niveau }, v)));
+    const qte = h("input", { id: "q-creation-qte", class: "compte", type: "text", inputmode: "numeric", placeholder: "combien ?", "aria-label": "Combien en avez-vous ?" });
+    zoneSaisie = h("form", { class: "saisie-choisi", onsubmit: (e) => { e.preventDefault(); tenter(async () => {
+      if (qte.value.trim() === "") { qte.focus(); throw new Error("Indiquez combien vous en avez (0 si aucun)."); }
+      const quantite = lireSaisie(qte.value, 0);
+      const { id } = await api("/pieces", { method: "POST", body: { nom: cr.nom, famille_id: cr.famille, niveau: cr.niveau, suivi: "quantite" } });
+      etat.stock = await api("/stock");
+      confirmer(pieceDe(id), quantite);
+      flash(`« ${cr.nom.trim()} » créé et compté ${quantite}.`);
+      c.creation = null; c.recherche = ""; c.focus = "q-recherche";
+      dessinerStock();
+    }); } },
+      h("b", {}, "Nouvel article"), h("div", { class: "ligne-editeur" }, nom, fam, type, qte),
+      h("div", { class: "ligne-editeur" }, h("button", { class: "btn" }, "Créer et compter"),
+        h("button", { type: "button", class: "btn-sec", onclick: () => { c.creation = null; c.focus = "q-recherche"; dessinerStock(); } }, "Annuler")));
+  }
+
+  // Ce qui vient d'être compté (le plus récent en haut), puis ce qui reste.
+  const comptes = c.ordre.map(pieceDe).filter(Boolean);
+  const restants = candidats.filter((p) => !dejaCompte(p));
+  const parFamille = etat.stock.map((f) => ({ f, ps: restants.filter((p) => p.famille_id === f.id) })).filter((x) => x.ps.length);
+
+  return [
+    h("section", { class: "carte panneau-recherche" }, recherche, zoneResultats, zoneSaisie),
+    h("section", { class: "carte" }, h("h2", {}, `Comptés dans ce comptage (${comptes.length})`),
+      comptes.length ? h("table", { class: "tbl" }, h("tbody", {}, comptes.map((p) => h("tr", {},
+        h("td", { style: "font-weight:600" }, h("a", { href: "#stock", onclick: (e) => { e.preventDefault(); choisir(p); } }, p.nom)),
+        h("td", { class: "num qte" }, valeurSession(p)),
+        h("td", {}, ecartTexte(p)),
+        h("td", { class: "num" }, h("button", { class: "btn-petit", title: "Pas compté finalement", onclick: () => { retirer(p); dessinerStock(); } }, "↺")))))) 
+        : h("div", { class: "vide" }, "Rien encore. Prenez un objet, tapez son nom, puis la quantité.")),
+    h("details", { class: "carte pas-comptes" },
+      h("summary", { class: "resume-details" }, `Pas encore comptés (${restants.length})` + (etat.depuis ? ` depuis le ${fmtDate(etat.depuis)}` : "")),
+      parFamille.length ? h("div", { class: "liste-restants" }, parFamille.map(({ f, ps }) => h("div", {},
+        h("strong", {}, f.nom),
+        h("div", { class: "puces" }, ps.map((p) => h("button", { type: "button", class: "btn-petit", onclick: () => choisir(p) }, p.nom))))))
+        : h("div", { class: "vide" }, "Tout est compté.")),
+  ];
+}
+
 function lignesSaisies() {
-  return Object.entries(etat.comptage || {})
-    .filter(([, v]) => v !== "")
-    .map(([id, v]) => ({ piece_id: Number(id), compte: Number(v) }));
+  return Object.entries(etat.comptage?.valeurs || {}).map(([id, v]) => ({ piece_id: Number(id), compte: v }));
 }
 
 function nbEcarts() {
-  const stocks = new Map(etat.stock.flatMap((f) => f.pieces).map((p) => [p.id, p.stock]));
+  const stocks = new Map(piecesListe().map((p) => [p.id, p.stock]));
   return lignesSaisies().filter((l) => l.compte !== stocks.get(l.piece_id)).length;
 }
 
 function barreComptage() {
+  const vis = piecesListe().filter((p) => estComptable(p) && filtreOk(p));
+  const faits = vis.filter(dejaCompte).length;
+  const pct = vis.length ? Math.round((faits / vis.length) * 100) : 0;
   return h("div", { class: "barre-comptage", id: "barre-comptage" },
-    h("div", { class: "progression", "aria-hidden": "true" }, h("i", { id: "progression", style: `width:${progression()}%` })),
-    h("span", { id: "nb-ecarts" }, texteEcarts()),
-    h("button", { class: "btn-sec", onclick: () => { etat.comptage = null; if (etat.comptageAvant) { etat.comptageAvant = null; location.hash = "salons"; } else dessinerStock(); } }, "Annuler"),
+    h("div", { class: "progression", "aria-hidden": "true" }, h("i", { style: `width:${pct}%` })),
+    h("span", {}, `${lignesSaisies().length} compté(s) maintenant · ${nbEcarts()} écart(s) · ${faits} / ${vis.length} à jour`),
+    h("button", { class: "btn-sec", onclick: () => { etat.comptage = null; if (etat.comptageAvant) { etat.comptageAvant = null; location.hash = "accueil"; } else dessinerStock(); } }, "Annuler"),
     h("button", { class: "btn", onclick: () => tenter(sauverComptage) }, "Enregistrer le comptage"),
   );
 }
 
-function texteEcarts() {
-  const n = lignesSaisies().length, e = nbEcarts();
-  return `${n} ligne(s) comptée(s) · ${e} écart(s) · les cases vides ne sont pas comptées`;
-}
-
-function progression() {
-  const total = piecesVisibles().flatMap((f) => f.pieces).filter((p) => p.suivi === "quantite").length;
-  return total ? Math.round((lignesSaisies().length / total) * 100) : 0;
-}
-
-function majBarreComptage() {
-  const el = document.getElementById("nb-ecarts");
-  if (el) el.textContent = texteEcarts();
-  const p = document.getElementById("progression");
-  if (p) p.style.width = progression() + "%";
-}
-
 function demarrerComptage() {
-  etat.comptage = {};
+  etat.comptage = { valeurs: {}, ordre: [], mode: "chercher", recherche: "", choisi: null, creation: null, pasComptes: false, focus: "q-recherche" };
   etat.ligneEnCours = null;
-  dessinerStock();
 }
 
 async function enregistrerComptage(lignes, avant = null) {
@@ -309,10 +477,10 @@ async function enregistrerComptage(lignes, avant = null) {
 
 async function sauverComptage() {
   const lignes = lignesSaisies();
-  if (!lignes.length) throw new Error("Aucune quantité saisie.");
+  if (!lignes.length) throw new Error("Rien n'a été compté.");
   await enregistrerComptage(lignes, etat.comptageAvant);
   etat.comptage = null;
-  if (etat.comptageAvant) { etat.comptageAvant = null; location.hash = "salons"; return; }
+  if (etat.comptageAvant) { etat.comptageAvant = null; location.hash = "accueil"; return; }
   await pageStock();
 }
 
@@ -1626,7 +1794,8 @@ function dessinerAccueil() {
   // Étiquettes : jalons (hors fabrication) et noms de salons. Placement au-dessus/en dessous, par rangées.
   const largeurPx = Math.max(680, (document.getElementById("page").clientWidth || 900) - 140);
   const items = [
-    ...d.jalons.filter((j) => !j.type.startsWith("fabrication")).map((j) => ({ j, x: centre(j.date), titre: j.nom, sous: fmtDate(j.date) })),
+    ...d.jalons.filter((j) => !j.type.startsWith("fabrication")).map((j) => ({ j, x: centre(j.date), titre: j.nom,
+      sous: fmtDate(j.date) + (j.type === "comptage" && d.comptage?.total && !j.fait ? ` · ${d.comptage.comptes}/${d.comptage.total} comptés` : "") })),
     ...d.salons.map((s) => ({ salon: s, x: pct(s.date_debut) + ((joursEntre(s.date_debut, s.fin) + 1) / total) * 50, titre: s.nom, sous: s.date_debut === s.fin ? fmtDate(s.date_debut) : `${fmtDate(s.date_debut)} → ${fmtDate(s.fin)}` })),
   ].sort((a, b) => a.x - b.x);
   const rangees = { h: [], b: [] };

@@ -5,7 +5,7 @@ import { Hono } from "hono";
 import { Env, erreur, texte, entier, corps, choix } from "./outils";
 import { planActuel } from "./atelier";
 import { calculerAchats } from "./achats";
-import { aujourdhui } from "./salons";
+import { aujourdhui, debutPreparation } from "./salons";
 
 export const accueil = new Hono<{ Bindings: Env }>();
 
@@ -35,10 +35,16 @@ accueil.get("/accueil", async (c) => {
   const achats = await calculerAchats(db, plan);
 
   const ph = prep.salon_ids.map(() => "?").join(",");
+  // Comptage avant : avancement sur les articles à vendre (comptés depuis le début de la préparation, d'où qu'on ait compté).
+  const depuis = await debutPreparation(db, ajd);
   const [jR, objR, cptR, espR] = await db.batch([
     db.prepare("SELECT id, type, nom, date, fait FROM jalon WHERE salon_id = ? ORDER BY date, id").bind(prep.id),
     db.prepare(`SELECT COUNT(*) AS n FROM objectif WHERE salon_id IN (${ph})`).bind(...prep.salon_ids),
-    db.prepare("SELECT COUNT(*) AS n FROM comptage WHERE type = 'avant' AND salon_id = ?").bind(prep.id),
+    db.prepare(
+      `SELECT COUNT(*) AS total, SUM(EXISTS (SELECT 1 FROM comptage_ligne cl JOIN comptage c ON c.id = cl.comptage_id
+         WHERE cl.piece_id = p.id AND (?1 IS NULL OR substr(c.date, 1, 10) >= ?1))) AS comptes
+       FROM piece p WHERE p.niveau = 'a_vendre' AND p.suivi = 'quantite' AND p.fin_de_serie = 0`,
+    ).bind(depuis),
     db.prepare(`SELECT COUNT(*) AS n FROM salon s WHERE s.id IN (${ph}) AND (s.especes_montant IS NOT NULL OR EXISTS (SELECT 1 FROM vente_especes ve WHERE ve.salon_id = s.id))`).bind(...prep.salon_ids),
   ]);
   const enregistres = jR.results as { id: number; type: string; nom: string | null; date: string; fait: number }[];
@@ -59,12 +65,14 @@ accueil.get("/accueil", async (c) => {
   const comptage = dateDe("comptage") ?? defauts.comptage;
   defauts.fabrication_fin = plus(comptage, -1);
 
+  const cpt0 = cptR.results[0] as { total: number; comptes: number | null };
+  const avComptage = { comptes: cpt0.comptes ?? 0, total: cpt0.total, depuis };
   const auto: Record<string, boolean> = {
     objectifs: n(objR) > 0,
     commandes: n(objR) > 0 && achats.lignes.length === 0,
     fabrication_debut: false,
     fabrication_fin: n(objR) > 0 && plan.travaux.length === 0,
-    comptage: n(cptR) > 0,
+    comptage: avComptage.total > 0 && avComptage.comptes === avComptage.total,
     bilan: n(espR) === salons.length,
   };
 
@@ -92,7 +100,7 @@ accueil.get("/accueil", async (c) => {
   for (const j of jalons) if (!j.fait && j.date < ajd && j.type !== "fabrication_debut") avert.push({ type: j.type, id: j.id, texte: `« ${j.nom} » était prévu le ${fr(j.date)} et n'est pas fait.` });
 
   return c.json({
-    preparation: prep, aujourdhui: ajd, salons, jalons, avertissements: avert,
+    preparation: prep, aujourdhui: ajd, salons, jalons, avertissements: avert, comptage: avComptage,
     fabrication: { jours: Math.max(0, ecart(fab0.date, fab1.date) + 1), travail_min: plan.travail_min, etapes: plan.travaux.length, articles_manquants: plan.articles.filter((a) => a.manque > 0).length },
     achats: achats.lignes.length, questions,
   });

@@ -2,7 +2,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { Env, NIVEAUX, SUIVIS, STOCK_SQL, erreur, texte, entier, choix, corps, lireLignesComptage, lirePieces, instructionsComptage } from "./outils";
 import { recettes } from "./recettes";
-import { salons } from "./salons";
+import { salons, debutPreparation } from "./salons";
 import { atelier } from "./atelier";
 import { questions } from "./questions";
 import { bilan, familleThermometre } from "./bilan";
@@ -120,7 +120,8 @@ app.get("/stock", async (c) => {
   const [fams, pieces] = await c.env.DB.batch([
     c.env.DB.prepare("SELECT id, nom, ordre, modele_non_precise FROM famille ORDER BY ordre, nom"),
     c.env.DB.prepare(
-      `SELECT p.id, p.nom, p.famille_id, p.niveau, p.suivi, p.fin_de_serie, p.presque_vide, ${STOCK_SQL} AS stock
+      `SELECT p.id, p.nom, p.famille_id, p.niveau, p.suivi, p.fin_de_serie, p.presque_vide, ${STOCK_SQL} AS stock,
+         (SELECT substr(MAX(c.date), 1, 10) FROM comptage_ligne cl JOIN comptage c ON c.id = cl.comptage_id WHERE cl.piece_id = p.id) AS dernier_comptage
        FROM piece p ORDER BY CASE p.niveau WHEN 'a_vendre' THEN 0 WHEN 'fait_maison' THEN 1 WHEN 'achete' THEN 2 ELSE 3 END, p.nom`,
     ),
   ]);
@@ -133,6 +134,9 @@ app.get("/stock", async (c) => {
 });
 
 // ───────────── Compter ─────────────
+// « Pas encore compté » = pas de comptage depuis le début de la préparation en cours.
+app.get("/comptages/etat", async (c) => c.json({ depuis: await debutPreparation(c.env.DB) }));
+
 // Une seule façon de corriger un chiffre : on tape le vrai, l'outil enregistre la différence.
 app.post("/comptages", async (c) => {
   const b = await corps(c);

@@ -21,6 +21,16 @@ const versJour = (d: string) => Date.UTC(+d.slice(0, 4), +d.slice(5, 7) - 1, +d.
 const versDate = (j: number) => new Date(j * JOUR).toISOString().slice(0, 10);
 export const aujourdhui = () => new Date().toISOString().slice(0, 10);
 
+// Début de la préparation en cours, pour savoir ce qui a été compté « récemment » :
+// le lendemain de la fin du dernier salon passé (null s'il n'y en a pas encore).
+export async function debutPreparation(db: D1Database, ajd = aujourdhui()): Promise<string | null> {
+  const r = await db.prepare(
+    `SELECT date(MAX(date(date_debut, '+' || (nb_jours - 1) || ' days')), '+1 day') AS depuis
+     FROM salon WHERE date(date_debut, '+' || (nb_jours - 1) || ' days') < ?`,
+  ).bind(ajd).first<{ depuis: string | null }>();
+  return r?.depuis ?? null;
+}
+
 export async function lireReglages(db: D1Database): Promise<Reglages> {
   const { results } = await db.prepare("SELECT cle, valeur FROM reglage").all<{ cle: string; valeur: string }>();
   const r = new Map(results.map((x) => [x.cle, x.valeur]));

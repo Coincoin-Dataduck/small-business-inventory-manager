@@ -31,6 +31,12 @@ Validée question par question avec Clément (novembre 2026). Les « ? » sont d
   - par un comptage (global ou d'une famille) ;
   - par une **vente impossible** (SumUp vend un article à stock 0 → question anti-oubli : « vous en avez sûrement fabriqué sans le noter, combien en aviez-vous ? ») ;
   - par une étape qui utilise plus de pièces que le stock (« selon l'outil il ne restait que 3 attaches ; combien en aviez-vous vraiment ? »).
+- **Comment on compte** (validé le 17/11/2026) :
+  - deux façons, avec les mêmes filtres (famille, type) : **chercher** (on part de l'objet qu'on a en main : quelques lettres, l'article, la quantité) ou **suivre la liste** ;
+  - la case affiche toujours un chiffre (l'attendu, ou ce qui a déjà été compté) : « 12 » remplace, « +5 » / « -2 » ajoute ou retire au chiffre de la case ; Entrée ou ✓ = compté ; bouton « 0 » = compté, il n'y en a pas ;
+  - un article absent de la liste se crée depuis le comptage (ou depuis le Stock) ; la quantité tapée est son premier comptage ;
+  - ce qui n'est pas compté reste tel quel ; « pas encore compté » = pas de comptage depuis le début de la préparation en cours (lendemain du dernier salon passé), d'où qu'on ait compté ; on peut compter en plusieurs fois ;
+  - jalon « Comptage avant » de l'Accueil : avancement « comptés / total » sur les articles à vendre suivis (hors fin de série) ; fait quand tous le sont.
 - **Tampons** : la caisse ne précise pas le motif. Famille Tampons marquée « la caisse ne précise pas le modèle » ; « Tampon unité » est relié à « Tampons, modèle non précisé » × 1, « Tampon lot » × 4, « Collection » × 20 (pas d'article fictif, pas d'effet sur le stock). La famille Tampons est le thermomètre (réglage) ; le total vendu est connu (unités + 4 × lots + 20 × collections, carte + espèces). Le suivi **par motif** ne vient que des comptages : sans comptage au retour, il se déduit au **comptage avant de la préparation suivante** : sorties d'un motif = comptage avant (N) + fabriqué depuis − comptage avant (N+1). Ce chiffre inclut dons, pertes, gachapon, et mélange les salons regroupés dans une même préparation. Vérification : total des sorties par motif ≈ tampons vendus (caisse) + gachapon. (Validé.)
 - Nom inconnu vu dans SumUp → « quel article est-ce ? » (article existant, nouvel article d'une famille, ou « ne pas suivre ») ; la réponse est mémorisée dans la correspondance.
 
