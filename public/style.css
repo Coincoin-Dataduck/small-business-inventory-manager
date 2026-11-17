@@ -475,3 +475,10 @@ input.compte, .formulaire input, .formulaire select, .editeur select, .editeur i
 .bandeau-caisse strong { font-family: var(--f-titre); font-weight: 400; font-size: 22px; color: var(--vert-texte); }
 .lecture-caisse { margin: 0 14px 12px; padding: 10px 14px; border-left: 4px solid var(--vert); background: var(--fond-doux); }
 .lecture-caisse p { margin: 4px 0; }
+.coupures { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: 12px; padding: 0 14px; }
+.coupures .sous-titre { margin: 8px 0 6px; }
+.grille-coupures { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+.coupure { display: flex; flex-direction: column; gap: 4px; font-weight: 700; font-size: 14px; }
+.coupure input { min-height: 40px; border: 1.5px solid var(--encre); border-radius: 2px; padding: 0 8px; font-family: var(--f-titre); font-size: 17px; text-align: right; width: 100%; }
+.total-caisse { display: flex; align-items: baseline; gap: 12px; padding: 12px 14px 4px; }
+.total-caisse strong { font-family: var(--f-titre); font-weight: 400; font-size: 26px; color: var(--vert-texte); }

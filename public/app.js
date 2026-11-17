@@ -2244,7 +2244,43 @@ function dessinerBilan() {
         await pageBilan(d.salon.id);
       }) }, "Enregistrer les espèces")));
 
-  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, tuiles, ...alertes, articles, especes, sectionCaisse()));
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, tuiles, ...alertes, articles, especes, sectionComptageCaisse(), sectionCaisse()));
+}
+
+// Comptage de caisse en fin de salon : billets et pièces, total en direct, enregistré à chaque saisie.
+const BILLETS = ["500", "200", "100", "50", "20", "10", "5"], PIECES = ["2", "1", "0.5", "0.2", "0.1", "0.05", "0.02", "0.01"];
+const libelleCoupure = (k) => (Number(k) >= 1 ? `${k} €` : `${Math.round(Number(k) * 100)} c`);
+function sectionComptageCaisse() {
+  const k = etat.caisse;
+  if (!k) return null;
+  const coupures = { ...k.caisse_comptee.coupures };
+  const totalEl = h("strong", {}), detailEl = h("div", { class: "lecture-caisse" });
+  const total = () => Math.round(Object.entries(coupures).reduce((t, [v, n]) => t + Number(v) * 100 * (Number(n) || 0), 0)) / 100;
+  const majTotaux = () => {
+    const t = total(), fond = k.fond_caisse, liquide = fond === null ? null : Math.round((t - fond) * 100) / 100;
+    totalEl.textContent = euros(t);
+    const reste = liquide === null ? null : Math.round((liquide - k.especes_notees.total) * 100) / 100;
+    const v = k.sans_trace.valeur_manquants;
+    detailEl.replaceChildren(
+      h("p", {}, "Compté : ", h("b", {}, euros(t)), fond === null ? h("span", {}, " · fond de caisse à indiquer dans ", h("a", { href: "#reglages" }, "Réglages")) : [" − fond ", euros(fond), " = liquide du salon ", h("b", {}, euros(liquide))]),
+      reste === null || !t ? null : h("p", {}, "− tes espèces notées ", euros(k.especes_notees.total), " = ", h("b", {}, euros(reste)), " restant",
+        reste < 0 ? h("span", { class: "manque-txt" }, ` : il manque ${euros(-reste)} dans la caisse (rendu de monnaie, vente notée deux fois, ou espèces pas toutes notées ?).`)
+          : ` : à comparer aux ${euros(v)} d'articles sortis sans trace ; ce qui dépasse correspond aux ventes de Lucille (notées ou oubliées).`));
+  };
+  const enregistrer = () => tenter(async () => {
+    await api(`/salons/${k.salon.id}/caisse`, { method: "PUT", body: { coupures } });
+    k.caisse_comptee = { coupures: { ...coupures }, total: total() };
+  });
+  const champ = (v) => h("label", { class: "coupure" }, h("span", {}, libelleCoupure(v)),
+    h("input", { type: "number", min: "0", step: "1", inputmode: "numeric", value: coupures[v] ?? "", placeholder: "0", "aria-label": `Nombre de ${libelleCoupure(v)}`,
+      oninput: (e) => { coupures[v] = e.target.value === "" ? 0 : Number(e.target.value); majTotaux(); }, onchange: enregistrer }));
+  majTotaux();
+  return h("section", { class: "carte" }, h("h2", {}, "Comptage de caisse"),
+    h("p", { class: "note", style: "margin:0;padding:0 14px" }, "Fin de salon, fond de caisse compris. Enregistré à chaque saisie."),
+    h("div", { class: "coupures" }, h("div", {}, h("h3", { class: "sous-titre" }, "Billets"), h("div", { class: "grille-coupures" }, BILLETS.map(champ))),
+      h("div", {}, h("h3", { class: "sous-titre" }, "Pièces"), h("div", { class: "grille-coupures" }, PIECES.map(champ)))),
+    h("div", { class: "total-caisse" }, h("span", { class: "note" }, "Total compté"), totalEl),
+    detailEl);
 }
 
 // Caisse et écarts : ce qui est sorti du stock sans trace (ni carte ni espèces notées), et sa valeur.

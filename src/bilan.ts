@@ -249,8 +249,8 @@ bilan.put("/salons/:id/especes", async (c) => {
 bilan.get("/salons/:id/caisse", async (c) => {
   const id = entier(c.req.param("id"), "id", 1);
   const db = c.env.DB;
-  const s = await db.prepare("SELECT id, nom, date_debut, date(date_debut, '+' || (nb_jours - 1) || ' days') AS fin FROM salon WHERE id = ?").bind(id)
-    .first<{ id: number; nom: string; date_debut: string; fin: string }>();
+  const s = await db.prepare("SELECT id, nom, date_debut, date(date_debut, '+' || (nb_jours - 1) || ' days') AS fin, caisse_comptee FROM salon WHERE id = ?").bind(id)
+    .first<{ id: number; nom: string; date_debut: string; fin: string; caisse_comptee: string | null }>();
   if (!s) erreur("Salon introuvable.", 404);
   const [avR, apR, mvR, pR, prixPieceR, prixFamR, espR, prixCleR, fondR] = await db.batch([
     // Dernier comptage de chaque article avant le premier jour du salon.
@@ -304,13 +304,36 @@ bilan.get("/salons/:id/caisse", async (c) => {
   const esp = (espR.results as { cle: string; quantite: number; nom_affiche: string }[]).map((e) => ({ ...e, prix: prixCle.get(e.cle) ?? null }));
   const manquants = lignes.filter((l) => l.sans_trace > 0);
   const somme = (xs: (number | null)[]) => Math.round(xs.reduce<number>((t, x) => t + (x ?? 0), 0) * 100) / 100;
+  const coupures = lireCoupures(s.caisse_comptee);
   return c.json({
-    salon: s,
+    salon: { id: s.id, nom: s.nom, date_debut: s.date_debut, fin: s.fin },
+    caisse_comptee: { coupures, total: totalCoupures(coupures) },
     fond_caisse: (fondR.results[0] as { valeur: string } | undefined) ? Number((fondR.results[0] as { valeur: string }).valeur) : null,
     comptes_avant: avant.size, comptes_apres: apres.size,
     especes_notees: { total: somme(esp.map((e) => (e.prix === null ? null : e.prix * e.quantite))), lignes: esp, sans_prix: esp.filter((e) => e.prix === null).map((e) => e.nom_affiche) },
     sans_trace: { lignes, valeur_manquants: somme(manquants.map((l) => l.valeur)), manquants_sans_prix: manquants.filter((l) => l.prix === null).map((l) => l.nom) },
   });
+});
+
+// Comptage de caisse : billets et pièces (fond compris).
+const COUPURES = ["500", "200", "100", "50", "20", "10", "5", "2", "1", "0.5", "0.2", "0.1", "0.05", "0.02", "0.01"];
+function lireCoupures(v: string | null): Record<string, number> {
+  try { const o = v ? JSON.parse(v) : {}; return Object.fromEntries(COUPURES.filter((k) => Number(o[k]) > 0).map((k) => [k, Math.floor(Number(o[k]))])); } catch { return {}; }
+}
+const totalCoupures = (c: Record<string, number>) => Math.round(Object.entries(c).reduce((t, [k, n]) => t + Number(k) * 100 * n, 0)) / 100;
+
+bilan.put("/salons/:id/caisse", async (c) => {
+  const id = entier(c.req.param("id"), "id", 1);
+  const b = await corps(c);
+  const brut = (b.coupures ?? {}) as Record<string, unknown>;
+  const coupures: Record<string, number> = {};
+  for (const k of COUPURES) if (brut[k] !== undefined && brut[k] !== "" && brut[k] !== null) {
+    const n = entier(brut[k], "nombre de " + k + " €", 0);
+    if (n) coupures[k] = n;
+  }
+  const r = await c.env.DB.prepare("UPDATE salon SET caisse_comptee = ? WHERE id = ?").bind(Object.keys(coupures).length ? JSON.stringify(coupures) : null, id).run();
+  if (!r.meta.changes) erreur("Salon introuvable.", 404);
+  return c.json({ ok: true, total: totalCoupures(coupures) });
 });
 
 bilan.put("/salons/:id/mal-expose", async (c) => {
