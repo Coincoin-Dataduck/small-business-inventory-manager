@@ -80,3 +80,8 @@ Les **préparations ne sont pas stockées** : elles se déduisent des dates et d
   - dans les deux cas, enlevé des étapes où il apparaît, après une alerte qui les nomme.
 - Fin de série sans stock : plus « à compter » (ni dans « pas encore comptés », ni dans le jalon Comptage avant).
 - Encreurs : famille « la caisse ne précise pas le modèle » (comme Tampons) ; produit Encreur VersaFine, 9 couleurs au nom inscrit sur l'encreur (mini VersaFine) ; les noms de caisse avec couleur sont reliés à « Encreurs, couleur non précisée » (`scripts/encreurs_versafine.sql`).
+
+## Recettes par produit (migration 0006, validé le 17/11/2026)
+- Page **Recettes** (menu) : une recette appartient à un produit (vaut pour toutes ses variantes), à un article simple, ou à toute une famille (« Tous les prints » : une feuille donne au choix 1 A3, 2 A4 ou 4 A5).
+- `recette_etape` (nom, mode, durée, ordre) + `recette_ligne` (utilise / donne ; un élément, ou « <produit> de la même variante ») + `recette_format` (recette commune : combien de chaque variante en une fois).
+- Les étapes concrètes (`etape`, utilisées par l'Atelier et « C'est fait ») sont **générées** : une par variante quand l'étape cite « même variante » (« Coller · Miaou »), une seule sinon (« Graver »). Régénérées à chaque modification de recette ou du catalogue ; une étape déjà faite qui n'a plus lieu d'être est gardée inerte pour l'historique.

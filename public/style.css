@@ -318,3 +318,60 @@ input.compte, .formulaire input, .formulaire select, .editeur select, .editeur i
 .btn-petit.danger { border-color: var(--vermillon); color: var(--alerte); }
 .btn-petit.danger:hover { background: var(--vermillon); color: #fff; }
 .saisie-choisi .menu-ligne, .saisie-choisi > .btn-menu { align-self: flex-start; }
+
+/* ===== Recettes ===== */
+.rc { display: grid; grid-template-columns: 260px minmax(0, 1fr); gap: 18px; align-items: start; }
+.rc-liste { padding: 10px; display: flex; flex-direction: column; gap: 2px; position: sticky; top: 12px; max-height: calc(100vh - 24px); overflow-y: auto; }
+.rc-liste .fam { font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--doux); font-weight: 700; padding: 10px 8px 4px; }
+.rc-liste .prod { display: flex; justify-content: space-between; align-items: center; gap: 8px; padding: 7px 8px; border: 0; border-radius: 2px; background: transparent; text-align: left; font: inherit; color: inherit; cursor: pointer; }
+.rc-liste .prod:hover { background: var(--fond-doux); }
+.rc-liste .prod.on { background: var(--vert); color: #fff; font-weight: 700; }
+.rc-liste .prod .sous { font-size: 11px; color: var(--doux); font-weight: 400; }
+.rc-liste .prod.on .sous { color: #D9EEE9; }
+.etat { font-size: 11px; font-weight: 700; padding: 1px 6px; border: 1.5px solid currentColor; border-radius: 2px; white-space: nowrap; }
+.etat.ok { color: var(--vert-texte); }
+.etat.ko, .etat.incomplete { color: var(--alerte); border-style: dashed; }
+.etat.commune { color: var(--doux); }
+.rc-liste .prod.on .etat { color: #fff; }
+.rc-main { display: flex; flex-direction: column; gap: 16px; min-width: 0; }
+.rc-tete { padding: 14px 16px; display: flex; flex-direction: column; gap: 8px; }
+.rc-titre { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.rc-titre h2 { padding: 0 !important; font-size: 24px !important; }
+.rc-tete .vaut { color: var(--doux); }
+.rc-tete .vaut b { color: var(--encre); }
+.recap { border-top: 1px solid var(--bord); padding-top: 8px; font-size: 14px; }
+.recap ol { margin: 6px 0 0; padding-left: 22px; display: flex; flex-direction: column; gap: 3px; }
+.etape-phrase { padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; }
+.etape-phrase .titre { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.etape-phrase .titre b { font-size: 17px; }
+.etape-phrase .titre input#rc-nom { flex: 1 1 260px; min-height: 40px; border: 2px solid var(--encre); border-radius: 2px; padding: 0 10px; font-size: 16px; font-weight: 700; }
+.phrase { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; line-height: 1.9; font-size: 15px; }
+.jeton { display: inline-flex; align-items: center; gap: 6px; border: 2px solid var(--encre); padding: 2px 8px; background: var(--carte); font-weight: 600; white-space: nowrap; }
+.jeton .q { font-family: var(--f-titre); font-weight: 400; min-width: 1.2em; text-align: right; border-right: 1.5px solid var(--bord); padding-right: 6px; }
+.jeton.var { border-color: var(--vert); color: var(--vert-texte); }
+.jeton.temps { border-color: var(--vermillon); }
+.jeton.vide { border-style: dashed; color: var(--alerte); font-weight: 600; }
+.jeton .q-saisie { width: 46px; border: 0; border-right: 1.5px solid var(--bord); font-family: var(--f-titre); font-size: 15px; text-align: right; padding: 0 6px 0 0; background: transparent; }
+.jeton input.compte { width: 54px; min-height: 28px; border: 0; text-align: right; font-family: var(--f-titre); }
+.retirer-jeton { border: 0; background: transparent; font-weight: 700; cursor: pointer; color: var(--doux); padding: 0 2px; }
+.retirer-jeton:hover { color: var(--alerte); }
+.lignes-edition { display: inline-flex; flex-wrap: wrap; align-items: center; gap: 6px; }
+.lien-etape { font-size: 12px; font-weight: 700; color: var(--vert-texte); white-space: nowrap; }
+.edition { border-color: var(--vermillon) !important; box-shadow: 4px 4px 0 var(--vermillon) !important; }
+.selecteur { position: relative; display: inline-block; }
+.saisie-element { min-height: 34px; min-width: 200px; border: 2px solid var(--encre); border-radius: 2px; padding: 0 8px; background: #fff; }
+.menu-elements { position: absolute; left: 0; top: calc(100% + 4px); z-index: 5; margin: 0; padding: 4px; list-style: none; background: #fff; border: 2px solid var(--encre); box-shadow: 4px 4px 0 var(--encre); min-width: 300px; line-height: 1.3; }
+.menu-elements button { display: flex; justify-content: space-between; gap: 12px; width: 100%; padding: 7px 8px; border: 0; background: transparent; text-align: left; font: inherit; cursor: pointer; }
+.menu-elements button:hover, .menu-elements button:focus-visible { background: var(--fond-doux); }
+.menu-elements li:first-child button { background: var(--fond-doux); }
+.menu-elements button.creer { font-weight: 600; }
+.menu-elements small { color: var(--doux); white-space: nowrap; }
+.question-mode { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 14px; }
+.ajout-etape { padding: 12px 16px; border: 2px dashed var(--doux); color: var(--gris); font-weight: 600; background: transparent; cursor: pointer; text-align: left; }
+.ajout-etape:hover:not(:disabled) { border-color: var(--encre); color: var(--encre); }
+.ajout-etape.manque { border-color: var(--vermillon); color: var(--alerte); background: var(--alerte-fond); }
+.lien-recette { display: inline-flex; align-items: center; text-decoration: none; color: inherit; }
+@media (max-width: 900px) {
+  .rc { grid-template-columns: minmax(0, 1fr); }
+  .rc-liste { position: static; max-height: 260px; }
+}

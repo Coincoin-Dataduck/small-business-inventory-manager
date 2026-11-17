@@ -9,6 +9,7 @@ const PAGES = [
   { id: "accueil", label: "Accueil" },
   { id: "stock", label: "Stock" },
   { id: "atelier", label: "Atelier" },
+  { id: "recettes", label: "Recettes" },
   { id: "achats", label: "À acheter" },
   { id: "salons", label: "Salons" },
   { id: "questions", label: "Questions" },
@@ -25,7 +26,7 @@ function h(tag, attrs = {}, ...enfants) {
     else if (k === "value") el.value = v;
     else el.setAttribute(k, v === true ? "" : v);
   }
-  for (const e of enfants.flat()) if (e !== null && e !== undefined && e !== false) el.append(e instanceof Node ? e : String(e));
+  for (const e of enfants.flat(Infinity)) if (e !== null && e !== undefined && e !== false) el.append(e instanceof Node ? e : String(e));
   return el;
 }
 
@@ -97,6 +98,7 @@ async function afficher() {
     if (etat.page === "stock") await pageStock();
     if (etat.page === "reglages") await pageReglages();
     if (etat.page === "atelier") await pageAtelier();
+    if (etat.page === "recettes") await pageRecettes();
     if (etat.page === "salons") await pageSalons();
     if (etat.page === "questions") await pageQuestions();
     if (etat.page === "achats") await pageAchats();
@@ -282,7 +284,8 @@ function ligneProduit(p, variantes) {
     h("div", { class: "tete-produit" },
       h("b", {}, p.produit),
       h("span", { class: "note" }, `${variantes.length} variante${variantes.length > 1 ? "s" : ""}` + (suivis.length ? ` · ${total} en tout` : "")),
-      ouvert ? ajout : h("button", { type: "button", class: "btn-petit", onclick: () => { etat.ajoutVariante = p.produit_id; dessinerStock(); } }, "+ variante"))));
+      ouvert ? ajout : h("button", { type: "button", class: "btn-petit", onclick: () => { etat.ajoutVariante = p.produit_id; dessinerStock(); } }, "+ variante"),
+      etat.comptage ? null : h("a", { class: "btn-petit lien-recette", href: "#recettes/p" + p.produit_id }, "Recette"))));
 }
 
 const variantesDe = (f) => (etat.stock.find((x) => x.id === f.id)?.variantes ?? []).join(", ");
@@ -694,7 +697,9 @@ function dessinerReglages() {
       h("td", { class: "num" }, h("button", { class: "btn-petit", onclick: () => tenter(async () => {
         await api("/pieces/" + p.id, { method: "PATCH", body: { retire: false } }); flash(`« ${p.nom} » remis dans le stock.`); await pageReglages();
       }) }, "Remettre dans le stock"))))))) : null;
-  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, sectionThermometre(), familles, pieces, retires, ...sectionsRecettes(), sectionCorrespondances()));
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, sectionThermometre(), familles, pieces, retires,
+    h("section", { class: "carte" }, h("h2", {}, "Recettes"), h("div", { class: "vide" }, "Les recettes ont leur propre page : ", h("a", { href: "#recettes" }, "Recettes"), ".")),
+    sectionCorrespondances()));
 }
 
 // Article thermomètre : ses ventes mesurent le passage devant le stand (Tampon lot = × 4, Collection = × 20).
@@ -751,6 +756,264 @@ function lignePieceReglage(p) {
   );
 }
 
+
+// ───────────── Recettes ─────────────
+// Une recette appartient à un produit (vaut pour toutes ses variantes), à un article simple,
+// ou à toute une famille (sortie au choix par variante, ex. prints). Chaque étape s'écrit comme une phrase.
+async function pageRecettes() {
+  [etat.stock, etat.recettes] = await Promise.all([api("/stock"), api("/recettes")]);
+  if (etat.params[0]) etat.recetteSel = etat.params[0];
+  dessinerRecettes();
+}
+
+function proprietaires() {
+  return etat.stock.map((f) => {
+    const items = [];
+    if (f.variantes?.length) items.push({ cle: "f" + f.id, type: "commune", famille: f, nom: `Tous les ${f.nom.toLowerCase()}`, sous: "au choix : " + f.variantes.join(" · ") });
+    const vus = new Set();
+    for (const p of f.pieces.filter((x) => x.niveau === "a_vendre" || x.niveau === "fait_maison")) {
+      if (p.produit_id) {
+        if (vus.has(p.produit_id)) continue;
+        vus.add(p.produit_id);
+        const vs = f.pieces.filter((x) => x.produit_id === p.produit_id);
+        items.push({ cle: "p" + p.produit_id, type: "produit", famille: f, produit_id: p.produit_id, nom: p.produit, variantes: vs, niveau: p.niveau, sous: `${vs.length} var.` + (p.niveau === "fait_maison" ? " · maison" : "") });
+      } else items.push({ cle: "a" + p.id, type: "piece", famille: f, piece: p, nom: p.nom, niveau: p.niveau, sous: p.niveau === "fait_maison" ? "maison" : "" });
+    }
+    return { famille: f, items };
+  }).filter((g) => g.items.length);
+}
+
+const etapesDe = (o) => etat.recettes
+  .filter((r) => (o.type === "commune" ? r.commune && r.famille_id === o.famille.id : o.type === "produit" ? r.produit_id === o.produit_id : r.piece_id === o.piece.id))
+  .sort((a, b) => a.ordre - b.ordre || a.id - b.id);
+
+const nomProduit = (id) => piecesListe().find((p) => p.produit_id === id)?.produit ?? "?";
+const nomLigne = (l) => (l.piece_id ? pieceDe(l.piece_id)?.nom ?? "?" : `${nomProduit(l.produit_id)} · même variante`);
+const memeLigne = (a, b) => (a.piece_id && a.piece_id === b.piece_id) || (a.produit_id && a.produit_id === b.produit_id);
+
+// Un élément est-il fabriqué par une recette ? (renvoie l'étape qui le fait)
+function fabriquePar(p) {
+  return etat.recettes.find((r) =>
+    r.lignes.some((l) => l.sens === "donne" && (l.piece_id === p.id || (p.produit_id && l.produit_id === p.produit_id)))
+    || (r.commune && r.famille_id === p.famille_id && p.niveau === "a_vendre" && r.formats.some((f) => f.variante === p.variante)));
+}
+const estFabrique = (p) => !!fabriquePar(p);
+// Nom de la recette (produit, article ou famille) à laquelle appartient une étape.
+const nomRecette = (r) => (r.commune ? `Tous les ${(etat.stock.find((f) => f.id === r.famille_id)?.nom ?? "").toLowerCase()}` : r.produit_id ? nomProduit(r.produit_id) : pieceDe(r.piece_id)?.nom ?? "?");
+function texteStatut(o, st) {
+  if (st !== "commune") return TEXTE_STATUT[st];
+  const r = fabriquePar(o.type === "produit" ? o.variantes[0] : o.piece);
+  return r ? `fait dans « ${nomRecette(r)} »` : "";
+}
+// Fournitures maison utilisées qui ne sont fabriquées par aucune recette.
+function maisonsManquantes(o) {
+  const vues = new Map();
+  for (const r of etapesDe(o)) for (const l of r.lignes.filter((x) => x.sens === "utilise")) {
+    const cibles = l.piece_id ? [pieceDe(l.piece_id)].filter(Boolean) : piecesListe().filter((p) => p.produit_id === l.produit_id);
+    for (const p of cibles) if (p.niveau === "fait_maison" && !estFabrique(p)) vues.set(p.produit_id ? "p" + p.produit_id : "a" + p.id, p.produit_id ? p.produit : p.nom);
+  }
+  return [...vues].map(([cle, nom]) => ({ cle, nom }));
+}
+function statutRecette(o) {
+  const etapes = etapesDe(o);
+  if (o.type === "commune") return etapes.length ? "ok" : "vide";
+  if (!etapes.length) {
+    const vs = o.type === "produit" ? o.variantes : [o.piece];
+    return vs.every(estFabrique) ? "commune" : "ko";
+  }
+  return maisonsManquantes(o).length ? "incomplete" : "ok";
+}
+const TEXTE_STATUT = { ok: "complète", ko: "à faire", incomplete: "incomplète", commune: "", vide: "" };
+
+function dessinerRecettes() {
+  entete("Recettes");
+  const page = document.getElementById("page");
+  const groupes = proprietaires();
+  const tous = groupes.flatMap((g) => g.items);
+  if (!tous.length) {
+    page.replaceChildren(h("div", { class: "carte" }, h("div", { class: "vide" }, "Aucun article à fabriquer pour l'instant. Ajoutez-en depuis le ", h("a", { href: "#stock" }, "Stock"), ".")));
+    return;
+  }
+  const sel = tous.find((o) => o.cle === etat.recetteSel) ?? tous.find((o) => o.type !== "commune") ?? tous[0];
+  etat.recetteSel = sel.cle;
+  const liste = h("nav", { class: "carte rc-liste", "aria-label": "Produits" }, groupes.map((g) => [
+    h("div", { class: "fam" }, g.famille.nom),
+    g.items.map((o) => {
+      const st = statutRecette(o);
+      return h("button", { type: "button", class: "prod" + (o === sel ? " on" : ""), "aria-current": o === sel ? "true" : null,
+        onclick: () => { etat.recetteSel = o.cle; etat.recetteEdit = null; dessinerRecettes(); } },
+        h("span", {}, o.nom, o.sous ? h("small", { class: "sous" }, " " + o.sous) : null),
+        texteStatut(o, st) ? h("small", { class: "etat " + st }, texteStatut(o, st)) : null);
+    })]));
+  page.replaceChildren(h("div", { class: "rc" }, liste, h("div", { class: "rc-main" }, ...carteRecette(sel))));
+  const f = etat.recetteFocus; etat.recetteFocus = null;
+  if (f) queueMicrotask(() => document.getElementById(f)?.focus());
+}
+
+function carteRecette(o) {
+  const etapes = etapesDe(o);
+  const ed = etat.recetteEdit && etat.recetteEdit.cle === o.cle ? etat.recetteEdit : null;
+  const resume = (r) => r.commune
+    ? `${r.lignes.map((l) => `${l.quantite} ${nomLigne(l)}`).join(" + ") || "rien"} → au choix ${r.formats.map((f) => `${f.quantite} ${f.variante}`).join(" ou ")}`
+    : `${r.lignes.filter((l) => l.sens === "utilise").map((l) => `${l.quantite} ${nomLigne(l)}`).join(" + ") || "rien"} → ${r.lignes.filter((l) => l.sens === "donne").map((l) => `${l.quantite} ${nomLigne(l)}`).join(" + ")}`;
+  const vaut = o.type === "produit"
+    ? h("div", { class: "vaut" }, "Une seule recette pour les ", h("b", {}, `${o.variantes.length} variante${o.variantes.length > 1 ? "s" : ""}`), " : ",
+        o.variantes.slice(0, 8).map((v) => v.variante).join(", ") + (o.variantes.length > 8 ? "…" : "") + ".")
+    : o.type === "commune" ? h("div", { class: "vaut" }, `Vaut pour tous les produits à vendre de la famille ${o.famille.nom}, selon leur variante (${o.famille.variantes.join(", ")}).`)
+    : o.niveau === "fait_maison" ? h("div", { class: "vaut" }, "Fourniture maison : préparée d'avance, gardée en réserve.") : null;
+  const st = statutRecette(o);
+  const tete = h("div", { class: "carte rc-tete" },
+    h("div", { class: "rc-titre" }, h("h2", {}, o.nom), texteStatut(o, st) ? h("span", { class: "etat " + st }, texteStatut(o, st)) : null),
+    vaut,
+    st === "commune" ? (() => { const r = fabriquePar(o.type === "produit" ? o.variantes[0] : o.piece); const c = r && (r.commune ? "f" + r.famille_id : r.produit_id ? "p" + r.produit_id : "a" + r.piece_id);
+      return h("div", { class: "vaut" }, "Fabriqué à l'étape « " + (r?.nom ?? "") + " » de la recette ", h("a", { href: "#recettes/" + c, onclick: (e) => { e.preventDefault(); etat.recetteSel = c; dessinerRecettes(); } }, nomRecette(r)), "."); })() : null,
+    etapes.length ? h("div", { class: "recap" }, h("strong", {}, `${etapes.length} étape${etapes.length > 1 ? "s" : ""}, dans l'ordre :`),
+      h("ol", {}, etapes.map((r) => h("li", {}, h("b", {}, r.nom), " : " + resume(r))))) : null);
+
+  const cartes = etapes.map((r, i) => (ed && ed.id === r.id ? editeurRecette(o, ed) : carteEtapeRecette(o, r, i, etapes)));
+  const manques = maisonsManquantes(o).map((m) => h("button", { type: "button", class: "ajout-etape manque", onclick: () => { etat.recetteSel = m.cle; etat.recetteEdit = null; ouvrirNouvelleEtape(); } },
+    `⚠ « ${m.nom} » est une fourniture maison que rien ne fabrique : + comment fait-on « ${m.nom} » ?`));
+  const nouvelle = ed && ed.id === null ? editeurRecette(o, ed)
+    : h("button", { type: "button", class: "ajout-etape", disabled: !!etat.recetteEdit, onclick: ouvrirNouvelleEtape }, etapes.length ? "+ Ajouter une étape" : "+ Écrire la première étape");
+  return [tete, ...cartes, nouvelle, ...manques];
+}
+
+function carteEtapeRecette(o, r, i, etapes) {
+  const jeton = (l, cls = "") => h("span", { class: "jeton " + cls }, h("span", { class: "q" }, l.quantite), nomLigne(l));
+  const avant = (l) => { const j = etapes.slice(0, i).findIndex((x) => x.lignes.some((y) => y.sens === "donne" && memeLigne(y, l))); return j >= 0 ? h("span", { class: "lien-etape" }, `← faite à l'étape ${j + 1}`) : null; };
+  const apres = (l) => { const k = etapes.slice(i + 1).findIndex((x) => x.lignes.some((y) => y.sens === "utilise" && memeLigne(y, l))); return k >= 0 ? h("span", { class: "lien-etape" }, `→ sert à l'étape ${i + k + 2}`) : null; };
+  const utilise = r.lignes.filter((l) => l.sens === "utilise"), donne = r.lignes.filter((l) => l.sens === "donne");
+  const et = (xs, f) => xs.flatMap((x, k) => (k ? [" + ", ...f(x)] : f(x)));
+  return h("div", { class: "carte etape-phrase" },
+    h("div", { class: "titre" }, h("span", { class: "numero" }, i + 1), h("b", {}, r.nom),
+      h("span", { class: "note" }, r.mode === "par_matiere" ? "tout d'un coup" : "un par un"),
+      h("span", { class: "actions-ligne", style: "margin-left:auto" },
+        h("button", { class: "btn-petit", disabled: i === 0 || !!etat.recetteEdit, title: "Monter", "aria-label": "Monter l'étape", onclick: () => deplacerEtape(r, "haut") }, "↑"),
+        h("button", { class: "btn-petit", disabled: i === etapes.length - 1 || !!etat.recetteEdit, title: "Descendre", "aria-label": "Descendre l'étape", onclick: () => deplacerEtape(r, "bas") }, "↓"),
+        h("button", { class: "btn-petit", disabled: !!etat.recetteEdit, onclick: () => { etat.recetteEdit = editionDepuis(o, r); dessinerRecettes(); } }, "Modifier"),
+        h("button", { class: "btn-petit danger", disabled: !!etat.recetteEdit, onclick: () => tenter(async () => {
+          if (!confirm(`Supprimer l'étape « ${r.nom} » ?`)) return;
+          await api("/recettes/" + r.id, { method: "DELETE" }); flash("Étape supprimée."); await pageRecettes();
+        }) }, "Supprimer"))),
+    h("div", { class: "phrase" }, "En une fois, on utilise ", ...(utilise.length ? et(utilise, (l) => [jeton(l), avant(l)]) : [h("span", { class: "note" }, "rien de suivi")]),
+      r.commune
+        ? [" et on obtient, au choix : ", ...r.formats.flatMap((f, k) => [k ? " ou " : "", h("span", { class: "jeton var" }, h("span", { class: "q" }, f.quantite), f.variante)])]
+        : [" et on obtient ", ...et(donne, (l) => [jeton(l, l.produit_id ? "var" : ""), apres(l)])],
+      " · ", r.temps_min === null ? h("span", { class: "jeton temps vide" }, "durée ?") : h("span", { class: "jeton temps" }, h("span", { class: "q" }, r.temps_min), "min")),
+    r.temps_min === null ? h("div", { class: "note", style: "font-size:13px" }, "Durée pas encore renseignée : l'Atelier ne pourra pas compter ce temps.") : null);
+}
+
+async function deplacerEtape(r, sens) {
+  await tenter(async () => { await api(`/recettes/${r.id}/deplacer`, { method: "POST", body: { sens } }); await pageRecettes(); });
+}
+
+function nouvelleEdition(o) {
+  return {
+    cle: o.cle, id: null, nom: "", mode: "a_la_piece", temps_min: "",
+    utilise: [],
+    donne: o.type === "produit" ? [{ produit_id: o.produit_id, quantite: 1 }] : o.type === "piece" ? [{ piece_id: o.piece.id, quantite: 1 }] : [],
+    formats: Object.fromEntries((o.famille.variantes ?? []).map((v) => [v, ""])),
+  };
+}
+function editionDepuis(o, r) {
+  const ed = nouvelleEdition(o);
+  Object.assign(ed, { id: r.id, nom: r.nom, mode: r.mode, temps_min: r.temps_min ?? "",
+    utilise: r.lignes.filter((l) => l.sens === "utilise").map((l) => ({ ...l })),
+    donne: r.lignes.filter((l) => l.sens === "donne").map((l) => ({ ...l })) });
+  for (const f of r.formats) ed.formats[f.variante] = String(f.quantite);
+  return ed;
+}
+function ouvrirNouvelleEtape() {
+  const o = proprietaires().flatMap((g) => g.items).find((x) => x.cle === etat.recetteSel);
+  if (!o) return;
+  etat.recetteEdit = nouvelleEdition(o);
+  etat.recetteFocus = "rc-nom";
+  dessinerRecettes();
+}
+
+function editeurRecette(o, ed) {
+  const nom = h("input", { id: "rc-nom", value: ed.nom, placeholder: "ex. Graver, Coller, Peindre et découper…", "aria-label": "Nom de l'étape", oninput: (e) => { ed.nom = e.target.value; } });
+  const temps = h("input", { class: "compte", type: "text", inputmode: "decimal", value: String(ed.temps_min), placeholder: "?", "aria-label": "Durée en minutes", oninput: (e) => { ed.temps_min = e.target.value; } });
+  const sortie = o.type === "commune"
+    ? [" et on obtient, au choix : ", ...Object.keys(ed.formats).flatMap((v, k) => [k ? " ou " : "", h("span", { class: "jeton var" },
+        h("input", { class: "q-saisie", type: "text", inputmode: "numeric", value: ed.formats[v], placeholder: "–", "aria-label": `Combien de ${v} en une fois`, oninput: (e) => { ed.formats[v] = e.target.value; } }), v)]),
+       h("span", { class: "note" }, " (laisser vide : pas ce format)")]
+    : [" et on obtient ", lignesEdition(o, ed, "donne")];
+  const enregistrer = () => tenter(async () => {
+    const lignes = [...ed.utilise.map((l) => ({ ...l, sens: "utilise" })), ...ed.donne.map((l) => ({ ...l, sens: "donne" }))]
+      .filter((l) => l.piece_id || l.produit_id).map((l) => ({ sens: l.sens, piece_id: l.piece_id ?? null, produit_id: l.produit_id ?? null, quantite: Number(l.quantite) }));
+    const body = { nom: ed.nom, mode: ed.mode, temps_min: String(ed.temps_min).trim() === "" ? null : Number(String(ed.temps_min).replace(",", ".")), lignes,
+      formats: Object.entries(ed.formats).filter(([, q]) => String(q).trim() !== "").map(([variante, q]) => ({ variante, quantite: Number(q) })),
+      ...(o.type === "commune" ? { commune: true, famille_id: o.famille.id } : o.type === "produit" ? { produit_id: o.produit_id } : { piece_id: o.piece.id }) };
+    await api(ed.id ? "/recettes/" + ed.id : "/recettes", { method: ed.id ? "PUT" : "POST", body });
+    flash(ed.id ? "Étape enregistrée." : "Étape ajoutée.");
+    etat.recetteEdit = null;
+    await pageRecettes();
+  });
+  return h("form", { class: "carte etape-phrase edition", onsubmit: (e) => { e.preventDefault(); enregistrer(); } },
+    h("div", { class: "titre" }, h("span", { class: "numero" }, "✎"), nom),
+    h("div", { class: "phrase" }, "En une fois, on utilise ", lignesEdition(o, ed, "utilise"), ...sortie, " · ça prend ", h("span", { class: "jeton temps" }, temps, "min")),
+    h("div", { class: "question-mode" }, "On peut en faire juste quelques-uns ?",
+      h("button", { type: "button", class: "pastille-filtre", "aria-pressed": String(ed.mode === "a_la_piece"), onclick: () => { ed.mode = "a_la_piece"; dessinerRecettes(); } }, "Oui, un par un"),
+      h("button", { type: "button", class: "pastille-filtre", "aria-pressed": String(ed.mode === "par_matiere"), onclick: () => { ed.mode = "par_matiere"; dessinerRecettes(); } }, "Non, tout d'un coup (une plaque, une feuille…)")),
+    h("div", { class: "ligne-editeur" }, h("button", { class: "btn" }, "Enregistrer"),
+      h("button", { type: "button", class: "btn-sec", onclick: () => { etat.recetteEdit = null; dessinerRecettes(); } }, "Annuler")));
+}
+
+// Liste de jetons modifiables (quantité + élément), avec un champ de recherche pour en ajouter.
+function lignesEdition(o, ed, sens) {
+  const liste = ed[sens];
+  const bloc = h("span", { class: "lignes-edition" });
+  liste.forEach((l, i) => {
+    if (i) bloc.append(" + ");
+    if (!l.piece_id && !l.produit_id) { bloc.append(selecteurElement(o, (choix) => { Object.assign(l, choix); dessinerRecettes(); }, `rc-${sens}-${i}`)); return; }
+    bloc.append(h("span", { class: "jeton" + (l.produit_id ? " var" : "") },
+      h("input", { class: "q-saisie", type: "text", inputmode: "numeric", value: String(l.quantite), "aria-label": "Quantité", oninput: (e) => { l.quantite = e.target.value; } }),
+      nomLigne(l),
+      h("button", { type: "button", class: "retirer-jeton", "aria-label": "Retirer " + nomLigne(l), onclick: () => { liste.splice(i, 1); dessinerRecettes(); } }, "×")));
+  });
+  if (!liste.some((l) => !l.piece_id && !l.produit_id))
+    bloc.append(h("button", { type: "button", class: "btn-petit", onclick: () => { liste.push({ piece_id: null, produit_id: null, quantite: 1 }); etat.recetteFocus = `rc-${sens}-${liste.length - 1}`; dessinerRecettes(); } },
+      liste.length ? "+" : sens === "utilise" ? "+ ajouter ce qu'on utilise" : "+ ajouter ce qu'on obtient"));
+  return bloc;
+}
+
+function selecteurElement(o, choisir, id) {
+  const saisie = h("input", { id, class: "saisie-element", placeholder: "tapez quelques lettres…", autocomplete: "off", "aria-label": "Chercher un élément" });
+  const menu = h("ul", { class: "menu-elements", role: "listbox" });
+  const options = () => {
+    const mots = sansAccent(saisie.value.trim()).split(/\s+/).filter(Boolean);
+    const ok = (t) => mots.every((m) => sansAccent(t).includes(m));
+    const pieces = piecesListe().filter((p) => ok(p.nom)).sort((a, b) => (b.famille_id === o.famille.id) - (a.famille_id === o.famille.id) || a.nom.localeCompare(b.nom));
+    const produits = o.type === "produit"
+      ? [...new Map(piecesListe().filter((p) => p.produit_id && ok(p.produit)).map((p) => [p.produit_id, p])).values()].map((p) => ({ produit_id: p.produit_id, nom: `${p.produit} · même variante`, sous: `${p.famille}, la variante qui correspond` }))
+      : [];
+    const res = [...produits, ...pieces.map((p) => ({ piece_id: p.id, nom: p.nom, sous: `${p.famille} · ${NIVEAUX[p.niveau]}` }))].slice(0, 8);
+    if (saisie.value.trim().length >= 2) {
+      res.push({ creer: "achete", nom: `+ Créer « ${saisie.value.trim()} »`, sous: "fourniture achetée" });
+      res.push({ creer: "fait_maison", nom: `+ Créer « ${saisie.value.trim()} »`, sous: "fourniture maison" });
+    }
+    return res;
+  };
+  const prendre = (x) => tenter(async () => {
+    if (x.creer) {
+      const { id: pid } = await api("/pieces", { method: "POST", body: { nom: saisie.value.trim(), famille_id: o.famille.id, niveau: x.creer, suivi: "quantite" } });
+      etat.stock = await api("/stock");
+      flash(`« ${saisie.value.trim()} » créé (${NIVEAUX[x.creer]}, famille ${o.famille.nom}).`);
+      choisir({ piece_id: pid, produit_id: null });
+    } else choisir(x.piece_id ? { piece_id: x.piece_id, produit_id: null } : { produit_id: x.produit_id, piece_id: null });
+  });
+  const remplir = () => {
+    const res = saisie.value.trim() ? options() : [];
+    menu.hidden = !res.length;
+    menu.replaceChildren(...res.map((x) => h("li", {}, h("button", { type: "button", class: x.creer ? "creer" : "", onmousedown: (e) => e.preventDefault(), onclick: () => prendre(x) },
+      h("span", {}, x.nom), h("small", {}, x.sous)))));
+  };
+  saisie.addEventListener("input", remplir);
+  saisie.addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); const r = options(); if (r.length) prendre(r[0]); } });
+  menu.hidden = true;
+  return h("span", { class: "selecteur" }, saisie, menu);
+}
 
 // ───────────── Recettes (Réglages) ─────────────
 const MODES = { par_matiere: "Par matière entière (une plaque, une feuille…)", a_la_piece: "À la pièce" };
@@ -968,7 +1231,7 @@ function dessinerAtelier() {
     etat.etapes.length
       ? etat.stock.filter((f) => etat.etapes.some((e) => e.famille_id === f.id)).map((f) =>
           h("div", {}, h("h3", { class: "sous-titre" }, f.nom), h("div", { class: "liste-etapes" }, etat.etapes.filter((e) => e.famille_id === f.id).map((e) => carteEtape(e)))))
-      : h("div", { class: "vide" }, "Aucune recette. Décrivez les étapes dans ", h("a", { href: "#reglages" }, "Réglages"), "."));
+      : h("div", { class: "vide" }, "Aucune recette. Décrivez les étapes dans ", h("a", { href: "#recettes" }, "Recettes"), "."));
   blocs.push(toutes);
 
   if (etat.faites.length) blocs.push(h("section", { class: "carte" }, h("h2", {}, "Dernières saisies"),
@@ -2076,7 +2339,7 @@ function lienJalon(type) {
 }
 
 window.addEventListener("hashchange", () => {
-  Object.assign(etat, { jalonChoisi: null, achatAction: null, achatEdition: null, corrEdition: null, comptage: null, ligneEnCours: null, edition: null, editeur: null, fait: null, salonEdition: null, comptageAvant: null });
+  Object.assign(etat, { recetteEdit: null, menuLigne: null, jalonChoisi: null, achatAction: null, achatEdition: null, corrEdition: null, comptage: null, ligneEnCours: null, edition: null, editeur: null, fait: null, salonEdition: null, comptageAvant: null });
   afficher();
 });
 afficher();
