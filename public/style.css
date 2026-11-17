@@ -446,3 +446,20 @@ input.compte, .formulaire input, .formulaire select, .editeur select, .editeur i
 .rc-liste .prod .etat { white-space: normal; max-width: 100%; }
 .pal-commun { display: flex; flex-direction: column; gap: 5px; padding-top: 6px; margin-top: 4px; border-top: 1px solid var(--bord); }
 .pal-commun h5 { margin: 6px 0 0; font-size: 11px; text-transform: uppercase; letter-spacing: .08em; color: var(--doux); font-weight: 700; }
+/* Établi : rien ne déborde sur un écran moyen */
+.et-etape > * { min-width: 0; }
+.flux > * { min-width: 0; }
+.chip { white-space: normal; max-width: 100%; flex-wrap: wrap; row-gap: 0; }
+.et-etape .nomligne { flex-wrap: wrap; row-gap: 6px; }
+.outils-etape { flex: none; }
+@media (max-width: 1400px) {
+  .rc3 { grid-template-columns: 230px minmax(0, 1fr); }
+  .rc3 > .rc-liste { grid-column: 1; grid-row: 1; position: static; max-height: 340px; }
+  .rc3 > .et-palette { grid-column: 1; grid-row: 2; position: static; max-height: none; order: 0; }
+  .rc3 > .et-main { grid-column: 2; grid-row: 1 / span 2; }
+}
+@media (max-width: 760px) {
+  .rc3 { grid-template-columns: minmax(0, 1fr); }
+  .rc3 > .rc-liste, .rc3 > .et-palette, .rc3 > .et-main { grid-column: 1; grid-row: auto; }
+  .rc3 > .et-palette { order: 2; }
+}
