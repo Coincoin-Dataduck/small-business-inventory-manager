@@ -972,6 +972,13 @@ function depot(o, e, i, sens) {
         lien(l) ? h("span", { class: "lk" }, lien(l)) : null,
         h("button", { type: "button", "aria-label": "Retirer " + nomLigne(l), onclick: () => { liste.splice(k, 1); sauverEtape(o, e); } }, "×"))])
       : h("span", { class: "vide2" }, etat.ingChoisi ? "touchez ici pour poser l'ingrédient choisi" : "glissez un ingrédient ici"));
+  const cv = etat.choixVariante;
+  if (cv && cv.i === i && cv.sens === sens) {
+    const vs = piecesListe().filter((p) => p.produit_id === cv.ing.produit_id);
+    d.append(h("div", { class: "choix-variante" }, h("span", {}, `Quelle ${cv.ing.nom} ?`),
+      vs.map((p) => h("button", { type: "button", class: "btn-petit", onclick: () => { etat.choixVariante = null; poserIngredient(o, { piece_id: p.id }, i, sens); } }, p.variante)),
+      h("button", { type: "button", class: "btn-petit", "aria-label": "Annuler", onclick: () => { etat.choixVariante = null; dessinerRecettes(); } }, "×")));
+  }
   return d;
 }
 
@@ -984,12 +991,17 @@ function depotFormats(o, e) {
     h("span", { class: "vide2", style: "width:100%" }, "vide = ce format ne sort pas de cette étape"));
 }
 
-function poserIngredient(o, ing, i, sens) {
+function poserIngredient(o, ingDepart, i, sens) {
+  let ing = ingDepart;
   const e = etat.travail.etapes[i];
   if (!e) return;
-  if (ing.produit_id && o.type !== "produit") { flash("Choisissez une variante précise : cherchez-la par son nom (ex. « Planchette Sauge »).", true); return; }
-  if (ing.produit_id && o.type === "produit" && ing.produit_id !== o.produit_id && !piecesListe().some((p) => p.produit_id === ing.produit_id && o.variantes.some((v) => v.variante === p.variante)))
-    flash("Attention : ce produit n'a aucune variante du même nom ; l'étape ne pourra pas être générée.", true);
+  if (ing.produit_id) {
+    const vs = piecesListe().filter((p) => p.produit_id === ing.produit_id);
+    // « Même variante » n'a de sens que si les variantes se correspondent (Mini-presse Sauge ↔ Planchette Sauge).
+    const correspond = o.type === "produit" && (ing.produit_id === o.produit_id || vs.some((p) => o.variantes.some((v) => v.variante === p.variante)));
+    if (vs.length === 1) ing = { piece_id: vs[0].id };
+    else if (!correspond) { etat.choixVariante = { ing, i, sens }; etat.ingChoisi = null; dessinerRecettes(); return; }
+  }
   const l = e[sens];
   const ex = l.find((x) => memeLigne(x, ing));
   if (ex) ex.quantite = Number(ex.quantite) + 1; else l.push({ piece_id: ing.piece_id ?? null, produit_id: ing.produit_id ?? null, quantite: 1 });
@@ -1009,10 +1021,10 @@ const GROUPES_ING = [["achete", "Achetées"], ["fait_maison", "Faites maison"], 
 function ingredientsDe(pieces) {
   const out = [], vus = new Set();
   for (const p of pieces) {
-    if (p.produit_id) {
+    const n = p.produit_id ? pieces.filter((x) => x.produit_id === p.produit_id).length : 0;
+    if (p.produit_id && n > 1) {
       if (vus.has(p.produit_id)) continue;
       vus.add(p.produit_id);
-      const n = pieces.filter((x) => x.produit_id === p.produit_id).length;
       out.push({ cle: "p" + p.produit_id, produit_id: p.produit_id, nom: p.produit, niveau: p.niveau, famille: p.famille, famille_id: p.famille_id, sous: `${n} var.` });
     } else out.push({ cle: "a" + p.id, piece_id: p.id, nom: p.nom, niveau: p.niveau === "recup" ? "achete" : p.niveau, famille: p.famille, famille_id: p.famille_id, sous: p.niveau === "recup" ? "récup" : "" });
   }

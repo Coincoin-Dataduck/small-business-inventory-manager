@@ -463,3 +463,4 @@ input.compte, .formulaire input, .formulaire select, .editeur select, .editeur i
   .rc3 > .rc-liste, .rc3 > .et-palette, .rc3 > .et-main { grid-column: 1; grid-row: auto; }
   .rc3 > .et-palette { order: 2; }
 }
+.choix-variante { width: 100%; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; padding: 6px; background: var(--carte); border: 1.5px solid var(--vermillon); font-size: 13px; font-weight: 600; }
