@@ -154,15 +154,32 @@ fiches.get("/recettes", async (c) => c.json(await lireRecettes(c.env.DB)));
 
 fiches.post("/recettes", async (c) => {
   const db = c.env.DB;
-  const s = await lireSaisie(db, await corps(c));
+  const b2 = await corps(c);
+  const s = await lireSaisie(db, b2);
   const ordre = s.ordre ?? ((await db.prepare("SELECT COALESCE(MAX(ordre), -1) + 1 AS n FROM recette_etape WHERE famille_id = ?").bind(s.famille_id).first<{ n: number }>())!.n);
-  await db.batch([
+  const res = await db.batch([
     db.prepare("INSERT INTO recette_etape (famille_id, produit_id, piece_id, commune, ordre, nom, mode, temps_min) VALUES (?, ?, ?, ?, ?, ?, ?, ?)")
       .bind(s.famille_id, s.produit_id, s.piece_id, s.commune, ordre, s.nom, s.mode, s.temps_min),
     ...instructionsLignes(db, "(SELECT MAX(id) FROM recette_etape)", s),
+    db.prepare("SELECT MAX(id) AS id FROM recette_etape"),
   ]);
+  const nouvelId = (res[res.length - 1].results[0] as { id: number }).id;
+  // Placée avant une étape précise (ex. l'étape qui fabrique une fourniture maison, avant celle qui l'utilise).
+  if (b2.avant_id != null) {
+    const avant = entier(b2.avant_id, "étape", 1);
+    const { results } = await db.prepare(
+      "SELECT id, ordre FROM recette_etape WHERE famille_id = ? AND produit_id IS ? AND piece_id IS ? AND commune = ? ORDER BY ordre, id",
+    ).bind(s.famille_id, s.produit_id, s.piece_id, s.commune).all<{ id: number; ordre: number }>();
+    const ids = results.map((x) => x.id).filter((x) => x !== nouvelId);
+    const k = ids.indexOf(avant);
+    if (k >= 0) {
+      ids.splice(k, 0, nouvelId);
+      const base = Math.min(...results.map((x) => x.ordre));
+      await db.batch(ids.map((x, n) => db.prepare("UPDATE recette_etape SET ordre = ? WHERE id = ?").bind(base + n, x)));
+    }
+  }
   await materialiser(db);
-  return c.json({ ok: true }, 201);
+  return c.json({ ok: true, id: nouvelId }, 201);
 });
 
 fiches.put("/recettes/:id", async (c) => {

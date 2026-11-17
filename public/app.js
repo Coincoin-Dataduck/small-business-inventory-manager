@@ -772,7 +772,9 @@ function proprietaires() {
     const items = [];
     if (f.variantes?.length) items.push({ cle: "f" + f.id, type: "commune", famille: f, nom: `Tous les ${f.nom.toLowerCase()}`, sous: "au choix : " + f.variantes.join(" · ") });
     const vus = new Set();
-    for (const p of f.pieces.filter((x) => x.niveau === "a_vendre" || x.niveau === "fait_maison")) {
+    // Les fournitures maison se fabriquent dans la recette du produit fini : pas d'entrée à part (sauf recette déjà écrite).
+    const aPart = (x) => x.niveau === "a_vendre" || (x.niveau === "fait_maison" && etat.recettes.some((r) => r.piece_id === x.id || (x.produit_id && r.produit_id === x.produit_id)));
+    for (const p of f.pieces.filter(aPart)) {
       if (p.produit_id) {
         if (vus.has(p.produit_id)) continue;
         vus.add(p.produit_id);
@@ -882,10 +884,10 @@ async function sauverEtape(o, e) {
   await tenter(async () => {
     if (e.id) await api("/recettes/" + e.id, { method: "PUT", body });
     else {
-      await api("/recettes", { method: "POST", body });
-      const avant = new Set(etat.recettes.map((r) => r.id));
-      etat.recettes = await api("/recettes");
-      e.id = etat.recettes.find((r) => !avant.has(r.id))?.id ?? null;
+      const liste = etat.travail?.etapes ?? [];
+      const suivante = liste.slice(liste.indexOf(e) + 1).find((x) => x.id);
+      const r = await api("/recettes", { method: "POST", body: { ...body, avant_id: suivante?.id ?? null } });
+      e.id = r.id;
       flash("Étape enregistrée.");
     }
     etat.recettes = await api("/recettes");
@@ -931,14 +933,25 @@ function etabli(o) {
         o.type === "commune" ? depotFormats(o, e) : depot(o, e, i, "donne")),
       manque.length ? h("div", { class: "a-completer" }, "À compléter : " + manque.join(" et ") + " (rien n'est enregistré avant).") : null);
   });
-  const manques = maisonsManquantes(o).map((m) => h("button", { type: "button", class: "et-ajout manque", onclick: () => { etat.recetteSel = m.cle; etat.travail = null; dessinerRecettes(); } },
-    `⚠ « ${m.nom} » est faite maison mais rien ne la fabrique : écrire sa recette`));
+  const manques = maisonsManquantes(o).map((m) => h("button", { type: "button", class: "et-ajout manque", onclick: () => ajouterEtapeQuiFabrique(o, m) },
+    `⚠ « ${m.nom} » est faite maison : + ajouter l'étape qui la fabrique`));
   return h("div", { class: "et-main" }, h("div", { class: "et-bloc" }, tete, ...lignes,
     h("button", { type: "button", class: "et-ajout", onclick: () => {
       etapes.push({ id: null, nom: "", mode: "a_la_piece", temps_min: "", utilise: [], formats: Object.fromEntries((o.famille.variantes ?? []).map((v) => [v, ""])),
         donne: o.type === "produit" ? [{ produit_id: o.produit_id, piece_id: null, quantite: 1 }] : o.type === "piece" ? [{ piece_id: o.piece.id, produit_id: null, quantite: 1 }] : [] });
       etat.recetteFocus = `et-nom-${etapes.length - 1}`; dessinerRecettes();
     } }, etapes.length ? "+ Ajouter une étape" : "+ Écrire la première étape")), ...manques);
+}
+
+// Une fourniture maison utilisée mais fabriquée nulle part : nouvelle étape juste avant celle qui l'utilise.
+function ajouterEtapeQuiFabrique(o, m) {
+  const etapes = etat.travail.etapes;
+  const ligne = m.cle.startsWith("p") ? { produit_id: Number(m.cle.slice(1)), piece_id: null } : { piece_id: Number(m.cle.slice(1)), produit_id: null };
+  if (ligne.produit_id && o.type !== "produit") { flash("Cette fourniture a des variantes : écrivez l'étape dans la recette d'un produit à variantes.", true); return; }
+  const i = Math.max(0, etapes.findIndex((e) => e.utilise.some((l) => memeLigne(l, ligne))));
+  etapes.splice(i, 0, { id: null, nom: "", mode: "a_la_piece", temps_min: "", utilise: [], formats: {}, donne: [{ ...ligne, quantite: 1 }] });
+  etat.recetteFocus = `et-nom-${i}`;
+  dessinerRecettes();
 }
 
 // Case « On utilise » / « On obtient » : on y glisse (ou y pose) des ingrédients.
