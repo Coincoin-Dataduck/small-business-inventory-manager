@@ -180,7 +180,7 @@ export async function lireObjectifs(db: D1Database, prepId: number) {
     db.prepare(
       `SELECT p.id, p.nom, f.id AS famille_id, f.nom AS famille, ${STOCK_SQL} AS stock
        FROM piece p JOIN famille f ON f.id = p.famille_id
-       WHERE p.niveau = 'a_vendre' AND p.suivi = 'quantite' AND p.fin_de_serie = 0
+       WHERE p.niveau = 'a_vendre' AND p.suivi = 'quantite' AND p.fin_de_serie = 0 AND p.retire = 0
        ORDER BY f.ordre, f.nom, p.nom`,
     ),
     db.prepare(`SELECT salon_id, piece_id, retenu, conseille, calcul FROM objectif WHERE salon_id IN (${ph})`).bind(...prep.salon_ids),

@@ -157,7 +157,7 @@ export async function planActuel(db: D1Database) {
   const obj = await lireObjectifs(db, etat.en_cours);
 
   const [piecesRes, etapes] = await Promise.all([
-    db.prepare(`SELECT p.id, p.nom, p.niveau, p.suivi, p.presque_vide, ${STOCK_SQL} AS stock FROM piece p`).all<Piece>(),
+    db.prepare(`SELECT p.id, p.nom, p.niveau, p.suivi, p.presque_vide, ${STOCK_SQL} AS stock FROM piece p WHERE p.retire = 0`).all<Piece>(),
     lireEtapesPourPlan(db),
   ]);
   const pieces = new Map(piecesRes.results.map((p) => [p.id, p]));

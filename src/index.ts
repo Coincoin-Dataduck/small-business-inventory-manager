@@ -95,6 +95,7 @@ app.patch("/pieces/:id", async (c) => {
   if (b.suivi !== undefined) { sets.push("suivi = ?"); vals.push(choix(b.suivi, SUIVIS, "suivi")); }
   if (b.fin_de_serie !== undefined) { sets.push("fin_de_serie = ?"); vals.push(b.fin_de_serie ? 1 : 0); }
   if (b.presque_vide !== undefined) { sets.push("presque_vide = ?"); vals.push(b.presque_vide ? 1 : 0); }
+  if (b.retire !== undefined) { sets.push("retire = ?"); vals.push(b.retire ? 1 : 0); }
   if (!sets.length) erreur("Rien à modifier.");
   try {
     const r = await c.env.DB.prepare(`UPDATE piece SET ${sets.join(", ")} WHERE id = ?`).bind(...vals, id).run();
@@ -177,6 +178,62 @@ app.patch("/produits/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+// ───────────── Supprimer / retirer ─────────────
+// Jamais vendu : vraiment supprimé (comptages et réserves compris : ça peut être une erreur de saisie).
+// Déjà vendu : retiré (absent du stock, du comptage et des calculs ; les ventes restent dans les bilans).
+// Dans les deux cas, il est enlevé des étapes où il apparaît (l'écran prévient avant).
+async function etatSuppression(db: D1Database, id: number) {
+  const [pR, vR, eR] = await db.batch([
+    db.prepare("SELECT id, nom, produit_id FROM piece WHERE id = ?").bind(id),
+    db.prepare("SELECT EXISTS (SELECT 1 FROM mouvement WHERE piece_id = ? AND motif IN ('vente', 'vente_especes')) AS vendu").bind(id),
+    db.prepare(
+      `SELECT DISTINCT e.nom FROM etape e WHERE e.id IN (
+         SELECT etape_id FROM etape_utilise WHERE piece_id = ?1 UNION SELECT etape_id FROM etape_donne WHERE piece_id = ?1
+         UNION SELECT d.etape_id FROM etape_choix c JOIN etape_donne d ON d.id = c.etape_donne_id WHERE c.piece_id = ?1) ORDER BY e.nom`,
+    ).bind(id),
+  ]);
+  const p = pR.results[0] as { id: number; nom: string; produit_id: number | null } | undefined;
+  if (!p) erreur("Article ou fourniture introuvable.", 404);
+  return { ...p, vendu: !!(vR.results[0] as { vendu: number }).vendu, etapes: (eR.results as { nom: string }[]).map((e) => e.nom) };
+}
+
+app.get("/pieces/:id/suppression", async (c) => {
+  const e = await etatSuppression(c.env.DB, entier(c.req.param("id"), "id", 1));
+  return c.json({ nom: e.nom, vendu: e.vendu, etapes: e.etapes });
+});
+
+app.delete("/pieces/:id", async (c) => {
+  const id = entier(c.req.param("id"), "id", 1);
+  const db = c.env.DB;
+  const e = await etatSuppression(db, id);
+  const horsEtapes = [
+    db.prepare("DELETE FROM etape_utilise WHERE piece_id = ?").bind(id),
+    db.prepare("DELETE FROM etape_choix WHERE piece_id = ?").bind(id),
+    db.prepare("DELETE FROM etape_donne WHERE piece_id = ?").bind(id),
+  ];
+  if (e.vendu) {
+    await db.batch([
+      ...horsEtapes,
+      db.prepare("DELETE FROM objectif WHERE piece_id = ? AND salon_id IN (SELECT id FROM salon WHERE date_debut >= date('now'))").bind(id),
+      db.prepare("UPDATE piece SET retire = 1 WHERE id = ?").bind(id),
+    ]);
+    return c.json({ action: "retire", etapes: e.etapes });
+  }
+  await db.batch([
+    ...horsEtapes,
+    ...["mouvement", "comptage_ligne", "objectif", "bilan_article", "correspondance_piece", "question", "commande", "achat_ajustement", "piece_lot"]
+      .map((t) => db.prepare(`DELETE FROM ${t} WHERE piece_id = ?`).bind(id)),
+    db.prepare("DELETE FROM piece WHERE id = ?").bind(id),
+    db.prepare("DELETE FROM produit WHERE id = ? AND NOT EXISTS (SELECT 1 FROM piece WHERE produit_id = ?)").bind(e.produit_id, e.produit_id),
+  ]);
+  return c.json({ action: "supprime", etapes: e.etapes });
+});
+
+app.get("/pieces/retires", async (c) => {
+  const { results } = await c.env.DB.prepare("SELECT p.id, p.nom, f.nom AS famille FROM piece p JOIN famille f ON f.id = p.famille_id WHERE p.retire = 1 ORDER BY f.ordre, p.nom").all();
+  return c.json(results);
+});
+
 // Historique d'une pièce : explique le chiffre affiché.
 app.get("/pieces/:id/mouvements", async (c) => {
   const id = entier(c.req.param("id"), "id", 1);
@@ -194,7 +251,7 @@ app.get("/stock", async (c) => {
       `SELECT p.id, p.nom, p.famille_id, p.niveau, p.suivi, p.fin_de_serie, p.presque_vide, ${STOCK_SQL} AS stock,
          p.produit_id, p.variante, (SELECT nom FROM produit WHERE id = p.produit_id) AS produit,
          (SELECT substr(MAX(c.date), 1, 10) FROM comptage_ligne cl JOIN comptage c ON c.id = cl.comptage_id WHERE cl.piece_id = p.id) AS dernier_comptage
-       FROM piece p ORDER BY CASE p.niveau WHEN 'a_vendre' THEN 0 WHEN 'fait_maison' THEN 1 WHEN 'achete' THEN 2 ELSE 3 END,
+       FROM piece p WHERE p.retire = 0 ORDER BY CASE p.niveau WHEN 'a_vendre' THEN 0 WHEN 'fait_maison' THEN 1 WHEN 'achete' THEN 2 ELSE 3 END,
          COALESCE((SELECT nom FROM produit WHERE id = p.produit_id), p.nom), p.variante, p.nom`,
     ),
   ]);

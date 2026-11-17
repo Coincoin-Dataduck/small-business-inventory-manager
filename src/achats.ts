@@ -29,7 +29,7 @@ export async function calculerAchats(db: D1Database, planDeja?: Awaited<ReturnTy
   const plan = planDeja ?? await planActuel(db);
   const [piecesR, lotsR, routeR, ajustR, commandesR] = await db.batch([
     db.prepare(`SELECT p.id, p.nom, p.niveau, p.suivi, p.delai_jours, p.mode_achat, p.presque_vide, f.nom AS famille, ${STOCK_SQL} AS stock
-                FROM piece p JOIN famille f ON f.id = p.famille_id WHERE p.niveau IN ('achete', 'recup')`),
+                FROM piece p JOIN famille f ON f.id = p.famille_id WHERE p.niveau IN ('achete', 'recup') AND p.retire = 0`),
     db.prepare("SELECT piece_id, taille FROM piece_lot ORDER BY taille"),
     db.prepare("SELECT piece_id, SUM(quantite) AS q FROM commande WHERE statut = 'commande' GROUP BY piece_id"),
     db.prepare("SELECT piece_id, quantite, avant_le FROM achat_ajustement"),

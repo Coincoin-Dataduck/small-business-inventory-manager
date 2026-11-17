@@ -311,3 +311,10 @@ input.compte, .formulaire input, .formulaire select, .editeur select, .editeur i
   .en-comptage .tbl-stock tr.ligne-variante .variante::before { content: none; }
 }
 @media (max-width: 760px) { .en-comptage .tbl-stock tr.produit { border: 0; background: none; padding: 0; } }
+
+/* « ⋯ » : fin de série, supprimer */
+.btn-menu { min-width: 34px; padding: 0 8px; font-weight: 700; }
+.menu-ligne { display: inline-flex; gap: 6px; flex-wrap: wrap; justify-content: flex-end; }
+.btn-petit.danger { border-color: var(--vermillon); color: var(--alerte); }
+.btn-petit.danger:hover { background: var(--vermillon); color: #fff; }
+.saisie-choisi .menu-ligne, .saisie-choisi > .btn-menu { align-self: flex-start; }

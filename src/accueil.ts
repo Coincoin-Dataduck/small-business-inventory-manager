@@ -2,7 +2,7 @@
 // Jalons standards (dates par défaut calculées, déplaçables) + jalons ajoutés à la main.
 // « Fait » est déduit quand l'outil peut le savoir ; avertissements sur l'ordre et les dates limites.
 import { Hono } from "hono";
-import { Env, erreur, texte, entier, corps, choix } from "./outils";
+import { Env, STOCK_SQL, erreur, texte, entier, corps, choix } from "./outils";
 import { planActuel } from "./atelier";
 import { calculerAchats } from "./achats";
 import { aujourdhui, debutPreparation } from "./salons";
@@ -43,7 +43,8 @@ accueil.get("/accueil", async (c) => {
     db.prepare(
       `SELECT COUNT(*) AS total, SUM(EXISTS (SELECT 1 FROM comptage_ligne cl JOIN comptage c ON c.id = cl.comptage_id
          WHERE cl.piece_id = p.id AND substr(c.date, 1, 10) >= ?1)) AS comptes
-       FROM piece p WHERE p.niveau = 'a_vendre' AND p.suivi = 'quantite' AND p.fin_de_serie = 0`,
+       FROM piece p WHERE p.niveau = 'a_vendre' AND p.suivi = 'quantite' AND p.retire = 0
+         AND NOT (p.fin_de_serie = 1 AND ${STOCK_SQL} <= 0)`,
     ).bind(depuis),
     db.prepare(`SELECT COUNT(*) AS n FROM salon s WHERE s.id IN (${ph}) AND (s.especes_montant IS NOT NULL OR EXISTS (SELECT 1 FROM vente_especes ve WHERE ve.salon_id = s.id))`).bind(...prep.salon_ids),
   ]);

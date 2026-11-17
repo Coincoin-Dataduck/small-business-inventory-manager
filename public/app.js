@@ -140,7 +140,9 @@ const valeurSession = (p) => etat.comptage?.valeurs[p.id];
 const valeurCase = (p) => valeurSession(p) ?? p.stock;
 const compteRecemment = (p) => !!p.dernier_comptage && !!etat.depuis && p.dernier_comptage >= etat.depuis;
 const refComptage = () => (etat.depuisSalon ? "depuis " + etat.depuisSalon : "aujourd'hui");
-const aCompter = (p) => estComptable(p) && !dejaCompte(p);
+// Fin de série sans stock : plus rien à compter.
+const aSuivre = (p) => estComptable(p) && !(p.fin_de_serie && p.stock <= 0);
+const aCompter = (p) => aSuivre(p) && !dejaCompte(p);
 const dejaCompte = (p) => valeurSession(p) !== undefined || compteRecemment(p);
 
 function lireSaisie(texte, base) {
@@ -215,7 +217,7 @@ function cartesFamilles() {
   return piecesVisibles().map((f) => {
     const pieces = etat.pasComptes ? f.pieces.filter(aCompter) : f.pieces;
     if (etat.pasComptes && !pieces.length) return null;
-    const suivis = f.pieces.filter(estComptable), faits = suivis.filter(dejaCompte).length;
+    const suivis = f.pieces.filter(aSuivre), faits = suivis.filter(dejaCompte).length;
     return h("section", { class: "carte" },
       h("div", { class: "tete-famille" }, h("h2", {}, f.nom),
         suivis.length ? h("div", { class: "avancement-famille" + (faits === suivis.length ? " complet" : "") },
@@ -395,17 +397,54 @@ function ligneStock(p) {
 
   const compte = c && comptable && valeurSession(p) !== undefined;
   const statut = !comptable ? null
+    : !aSuivre(p) ? h("small", { class: "statut" }, "fin de série, plus en stock")
     : valeurSession(p) !== undefined ? h("small", { class: "statut ok" }, "✓ compté maintenant")
     : compteRecemment(p) ? h("small", { class: "statut ok" }, "✓ compté le " + fmtDate(p.dernier_comptage))
     : h("small", { class: "statut ko" }, "pas compté " + refComptage() + (p.dernier_comptage ? ` (dernier : ${fmtDate(p.dernier_comptage)})` : " (jamais)"));
-  return h("tr", { class: [compte ? "compte-fait" : "", comptable && !dejaCompte(p) ? "a-compter" : "", p.produit_id ? "ligne-variante" : ""].join(" ").trim() || null },
+  return h("tr", { class: [compte ? "compte-fait" : "", aCompter(p) ? "a-compter" : "", p.produit_id ? "ligne-variante" : ""].join(" ").trim() || null },
     h("td", { class: "col-badge" }, h("span", { class: "badge badge-" + p.niveau }, NIVEAUX[p.niveau])),
     h("td", { style: "font-weight:600" }, p.produit_id ? h("span", { class: "variante", title: p.nom }, p.variante) : p.nom,
       c && comptable ? h("small", { class: "attendu" }, (p.produit_id ? p.produit + " · " : "") + "attendu " + p.stock) : null, statut),
     h("td", { class: "num qte" + (comptable && p.stock < 0 ? " neg" : comptable && p.stock === 0 ? " zero" : "") }, comptable ? p.stock : "—"),
     h("td", { class: "note" }, noteStock(p)),
-    h("td", { class: "col-action" }, action),
+    h("td", { class: "col-action" }, h("div", { class: "actions-ligne" }, action, menuLigne(p))),
   );
+}
+
+// « ⋯ » : fin de série et suppression sans passer par Réglages (aussi pendant un comptage).
+function menuLigne(p) {
+  if (etat.menuLigne !== p.id) return h("button", { type: "button", class: "btn-petit btn-menu", title: "Fin de série, supprimer…", "aria-label": "Plus d'actions pour " + p.nom, onclick: () => { etat.menuLigne = p.id; dessinerStock(); } }, "⋯");
+  return h("div", { class: "menu-ligne" },
+    h("button", { type: "button", class: "btn-petit", onclick: () => tenter(async () => {
+      await api("/pieces/" + p.id, { method: "PATCH", body: { fin_de_serie: !p.fin_de_serie } });
+      flash(p.fin_de_serie ? `« ${p.nom} » remis en vente.` : `« ${p.nom} » passé en fin de série.`);
+      etat.menuLigne = null; await rechargerStock();
+    }) }, p.fin_de_serie ? "Remettre en vente" : "Fin de série"),
+    h("button", { type: "button", class: "btn-petit danger", onclick: () => tenter(() => supprimerPiece(p)) }, "Supprimer…"),
+    h("button", { type: "button", class: "btn-petit", "aria-label": "Fermer", onclick: () => { etat.menuLigne = null; dessinerStock(); } }, "×"));
+}
+
+// Recharge le stock sans perdre un comptage en cours.
+async function rechargerStock() {
+  const [stock, ce] = await Promise.all([api("/stock"), api("/comptages/etat")]);
+  etat.stock = stock; etat.depuis = ce.depuis; etat.depuisSalon = ce.salon;
+  if (etat.comptage) for (const id of Object.keys(etat.comptage.valeurs)) if (!pieceDe(Number(id))) retirer({ id: Number(id) });
+  dessinerStock();
+}
+
+async function supprimerPiece(p) {
+  const d = await api(`/pieces/${p.id}/suppression`);
+  const etapes = d.etapes.length ? `\n\nAttention : il est utilisé dans ${d.etapes.length > 1 ? "les étapes" : "l'étape"} ${d.etapes.map((e) => `« ${e} »`).join(", ")}. Il en sera enlevé.` : "";
+  const texte = d.vendu
+    ? `« ${d.nom} » a déjà été vendu : il sera retiré du stock et du comptage (ses ventes restent dans les bilans ; on peut le remettre depuis Réglages).${etapes}\n\nRetirer ?`
+    : `Supprimer « ${d.nom} » ? Il n'a jamais été vendu : il disparaît, avec ses comptages.`
+      + (estComptable(p) && p.stock > 0 ? `\n\nIl en reste ${p.stock} en stock selon l'outil.` : "") + etapes;
+  if (!confirm(texte)) return;
+  const r = await api("/pieces/" + p.id, { method: "DELETE" });
+  flash(r.action === "retire" ? `« ${d.nom} » retiré du stock.` : `« ${d.nom} » supprimé.`);
+  etat.menuLigne = null;
+  if (etat.comptage?.choisi === p.id) etat.comptage.choisi = null;
+  await rechargerStock();
 }
 
 function ecartTexte(p) {
@@ -460,6 +499,7 @@ function panneauRecherche() {
     zoneSaisie = h("div", { class: "saisie-choisi" },
       h("div", {}, h("b", {}, choisi.nom), h("div", { class: "note" }, `${choisi.famille} · attendu ${choisi.stock}` + (valeurSession(choisi) !== undefined ? ` · déjà compté ${valeurSession(choisi)} (tapez +5 pour ajouter)` : ""))),
       caseComptage(choisi, "q-choisi", () => { c.choisi = null; c.recherche = ""; c.focus = "q-recherche"; dessinerStock(); }),
+      menuLigne(choisi),
       h("button", { type: "button", class: "btn-petit", onclick: () => { c.choisi = null; c.focus = "q-recherche"; dessinerStock(); } }, "Annuler"));
   } else if (c.creation) {
     const cr = c.creation;
@@ -498,7 +538,7 @@ function panneauRecherche() {
 
   // Ce qui vient d'être compté (le plus récent en haut), puis ce qui reste.
   const comptes = c.ordre.map(pieceDe).filter(Boolean);
-  const restants = candidats.filter((p) => !dejaCompte(p));
+  const restants = candidats.filter(aCompter);
   const parFamille = etat.stock.map((f) => ({ f, ps: restants.filter((p) => p.famille_id === f.id) })).filter((x) => x.ps.length);
 
   return [
@@ -530,7 +570,7 @@ function nbEcarts() {
 }
 
 function barreComptage() {
-  const vis = piecesListe().filter((p) => estComptable(p) && filtreOk(p));
+  const vis = piecesListe().filter((p) => aSuivre(p) && filtreOk(p));
   const faits = vis.filter(dejaCompte).length;
   const pct = vis.length ? Math.round((faits / vis.length) * 100) : 0;
   return h("div", { class: "barre-comptage", id: "barre-comptage" },
@@ -564,7 +604,7 @@ async function sauverComptage() {
 
 // ───────────── Réglages : familles, articles et fournitures ─────────────
 async function pageReglages() {
-  [etat.familles, etat.stock, etat.etapes, etat.correspondances, etat.reglages] = await Promise.all([api("/familles"), api("/stock"), api("/etapes"), api("/correspondances"), api("/reglages")]);
+  [etat.familles, etat.stock, etat.etapes, etat.correspondances, etat.reglages, etat.retires] = await Promise.all([api("/familles"), api("/stock"), api("/etapes"), api("/correspondances"), api("/reglages"), api("/pieces/retires")]);
   dessinerReglages();
 }
 
@@ -646,7 +686,15 @@ function dessinerReglages() {
     );
   }
 
-  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, sectionThermometre(), familles, pieces, ...sectionsRecettes(), sectionCorrespondances()));
+  const retires = etat.retires?.length ? h("section", { class: "carte" },
+    h("h2", {}, "Articles retirés"),
+    h("p", { class: "note", style: "margin:0;padding:0 14px" }, "Déjà vendus, donc gardés pour les bilans, mais absents du stock et du comptage."),
+    h("table", { class: "tbl" }, h("tbody", {}, etat.retires.map((p) => h("tr", {},
+      h("td", { style: "font-weight:600" }, p.nom), h("td", { class: "note" }, p.famille),
+      h("td", { class: "num" }, h("button", { class: "btn-petit", onclick: () => tenter(async () => {
+        await api("/pieces/" + p.id, { method: "PATCH", body: { retire: false } }); flash(`« ${p.nom} » remis dans le stock.`); await pageReglages();
+      }) }, "Remettre dans le stock"))))))) : null;
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, sectionThermometre(), familles, pieces, retires, ...sectionsRecettes(), sectionCorrespondances()));
 }
 
 // Article thermomètre : ses ventes mesurent le passage devant le stand (Tampon lot = × 4, Collection = × 20).

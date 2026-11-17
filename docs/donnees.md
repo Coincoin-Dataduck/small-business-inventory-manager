@@ -72,3 +72,11 @@ Les **préparations ne sont pas stockées** : elles se déduisent des dates et d
 - `famille.variantes` (JSON) : variantes proposées à la création d'un produit de la famille (Prints : A3, A4, A5 ; Kits : Maison, Serre). On peut en retirer à la création, en ajouter ensuite (« + variante »).
 - Renommer un produit renomme ses variantes.
 - Regroupement de départ : `scripts/regroupement_variantes.sql` (Tampon → petits noms ; prints → formats ; Kit, Jeu de planchettes, Livret → Maison/Serre ; Mini-presse et Planchette → motifs ; Peinture → couleurs ; fusion de « Plouf- Print Fine Art » dans Piou plouf et des deux Carnet ; famille Canards renommée Pins ; famille Carnets supprimée).
+
+## Retirer / supprimer (migration 0005, validé le 17/11/2026)
+- Depuis le Stock ou le comptage (« ⋯ ») : **Fin de série** d'un clic ; **Supprimer** :
+  - jamais vendu (aucun mouvement de vente) : vraiment supprimé, comptages compris ;
+  - déjà vendu : `piece.retire = 1` — absent du stock, du comptage, des achats, de l'Atelier et des objectifs à venir ; ventes gardées pour les bilans ; « Remettre dans le stock » depuis Réglages ;
+  - dans les deux cas, enlevé des étapes où il apparaît, après une alerte qui les nomme.
+- Fin de série sans stock : plus « à compter » (ni dans « pas encore comptés », ni dans le jalon Comptage avant).
+- Encreurs : famille « la caisse ne précise pas le modèle » (comme Tampons) ; produit Encreur VersaFine, 9 couleurs au nom inscrit sur l'encreur (mini VersaFine) ; les noms de caisse avec couleur sont reliés à « Encreurs, couleur non précisée » (`scripts/encreurs_versafine.sql`).
