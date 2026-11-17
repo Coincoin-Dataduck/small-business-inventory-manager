@@ -802,12 +802,13 @@ function dessinerReglages() {
 // Famille thermomètre : ses ventes mesurent le passage devant le stand (Tampon lot = × 4, Collection = × 20).
 function sectionFondCaisse() {
   const r = etat.reglages ?? {};
-  return h("section", { class: "carte" }, h("h2", {}, "Caisse"),
-    h("div", { class: "formulaire" },
-      h("label", { for: "fond-caisse" }, "Fond de caisse (€), toujours le même",
-        h("input", { id: "fond-caisse", type: "number", min: "0", step: "0.01", value: r.fond_caisse ?? "", style: "width:140px",
-          onchange: (e) => tenter(async () => { await api("/reglages", { method: "PUT", body: { cle: "fond_caisse", valeur: e.target.value } }); flash("Fond de caisse enregistré."); etat.reglages = await api("/reglages"); }) })),
-      h("p", { class: "note", style: "margin:0;font-size:13px;max-width:520px" }, "Sert au bilan de chaque salon (Caisse et écarts) : ce qu'il devrait y avoir dans la caisse pour tes articles.")));
+  const coupures = { ...(r.fond_caisse_coupures ?? {}) };
+  const totalEl = h("strong", {}, euros(totalCoupures(coupures)));
+  return h("section", { class: "carte" }, h("h2", {}, "Fond de caisse"),
+    h("p", { class: "note", style: "margin:0;padding:0 14px" }, "Toujours le même : ce qu'il y a dans la caisse en début de salon. Retiré du comptage de caisse dans le bilan de chaque salon. Enregistré à chaque saisie."),
+    grilleCoupures(coupures, () => { totalEl.textContent = euros(totalCoupures(coupures)); },
+      () => tenter(async () => { await api("/reglages/fond-caisse", { method: "PUT", body: { coupures } }); etat.reglages = await api("/reglages"); }), "fond"),
+    h("div", { class: "total-caisse" }, h("span", { class: "note" }, "Fond de caisse"), totalEl));
 }
 
 function sectionThermometre() {
@@ -2250,12 +2251,22 @@ function dessinerBilan() {
 // Comptage de caisse en fin de salon : billets et pièces, total en direct, enregistré à chaque saisie.
 const BILLETS = ["500", "200", "100", "50", "20", "10", "5"], PIECES = ["2", "1", "0.5", "0.2", "0.1", "0.05", "0.02", "0.01"];
 const libelleCoupure = (k) => (Number(k) >= 1 ? `${k} €` : `${Math.round(Number(k) * 100)} c`);
+// Grille billets / pièces : coupures = { "50": 3, … } ; surSaisie à chaque frappe, surFin quand une case est quittée.
+function grilleCoupures(coupures, surSaisie, surFin, prefixe) {
+  const champ = (v) => h("label", { class: "coupure" }, h("span", {}, libelleCoupure(v)),
+    h("input", { id: `${prefixe}-${v}`, type: "number", min: "0", step: "1", inputmode: "numeric", value: coupures[v] ?? "", placeholder: "0", "aria-label": `Nombre de ${libelleCoupure(v)}`,
+      oninput: (e) => { coupures[v] = e.target.value === "" ? 0 : Number(e.target.value); surSaisie(); }, onchange: surFin }));
+  return h("div", { class: "coupures" }, h("div", {}, h("h3", { class: "sous-titre" }, "Billets"), h("div", { class: "grille-coupures" }, BILLETS.map(champ))),
+    h("div", {}, h("h3", { class: "sous-titre" }, "Pièces"), h("div", { class: "grille-coupures" }, PIECES.map(champ))));
+}
+const totalCoupures = (c) => Math.round(Object.entries(c).reduce((t, [v, n]) => t + Number(v) * 100 * (Number(n) || 0), 0)) / 100;
+
 function sectionComptageCaisse() {
   const k = etat.caisse;
   if (!k) return null;
   const coupures = { ...k.caisse_comptee.coupures };
   const totalEl = h("strong", {}), detailEl = h("div", { class: "lecture-caisse" });
-  const total = () => Math.round(Object.entries(coupures).reduce((t, [v, n]) => t + Number(v) * 100 * (Number(n) || 0), 0)) / 100;
+  const total = () => totalCoupures(coupures);
   const majTotaux = () => {
     const t = total(), fond = k.fond_caisse, liquide = fond === null ? null : Math.round((t - fond) * 100) / 100;
     totalEl.textContent = euros(t);
@@ -2271,14 +2282,10 @@ function sectionComptageCaisse() {
     await api(`/salons/${k.salon.id}/caisse`, { method: "PUT", body: { coupures } });
     k.caisse_comptee = { coupures: { ...coupures }, total: total() };
   });
-  const champ = (v) => h("label", { class: "coupure" }, h("span", {}, libelleCoupure(v)),
-    h("input", { type: "number", min: "0", step: "1", inputmode: "numeric", value: coupures[v] ?? "", placeholder: "0", "aria-label": `Nombre de ${libelleCoupure(v)}`,
-      oninput: (e) => { coupures[v] = e.target.value === "" ? 0 : Number(e.target.value); majTotaux(); }, onchange: enregistrer }));
   majTotaux();
   return h("section", { class: "carte" }, h("h2", {}, "Comptage de caisse"),
     h("p", { class: "note", style: "margin:0;padding:0 14px" }, "Fin de salon, fond de caisse compris. Enregistré à chaque saisie."),
-    h("div", { class: "coupures" }, h("div", {}, h("h3", { class: "sous-titre" }, "Billets"), h("div", { class: "grille-coupures" }, BILLETS.map(champ))),
-      h("div", {}, h("h3", { class: "sous-titre" }, "Pièces"), h("div", { class: "grille-coupures" }, PIECES.map(champ)))),
+    grilleCoupures(coupures, majTotaux, enregistrer, "caisse"),
     h("div", { class: "total-caisse" }, h("span", { class: "note" }, "Total compté"), totalEl),
     detailEl);
 }

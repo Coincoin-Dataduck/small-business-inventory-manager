@@ -329,7 +329,25 @@ const REGLAGES_MODIFIABLES = ["famille_thermometre", "seuil_jours", "marge", "ma
 app.get("/reglages", async (c) => {
   const { results } = await c.env.DB.prepare("SELECT cle, valeur FROM reglage").all<{ cle: string; valeur: string }>();
   const r = Object.fromEntries(results.filter((x) => REGLAGES_MODIFIABLES.includes(x.cle)).map((x) => [x.cle, x.valeur]));
-  return c.json({ ...r, famille_thermometre_effectif: await familleThermometre(c.env.DB) });
+  const fc = results.find((x) => x.cle === "fond_caisse_coupures");
+  let fond_caisse_coupures: Record<string, number> = {};
+  try { fond_caisse_coupures = fc ? JSON.parse(fc.valeur) : {}; } catch {}
+  return c.json({ ...r, fond_caisse_coupures, famille_thermometre_effectif: await familleThermometre(c.env.DB) });
+});
+
+// Fond de caisse, billet par billet et pièce par pièce ; le total sert au bilan des salons.
+const COUPURES_FOND = ["500", "200", "100", "50", "20", "10", "5", "2", "1", "0.5", "0.2", "0.1", "0.05", "0.02", "0.01"];
+app.put("/reglages/fond-caisse", async (c) => {
+  const brut = ((await corps(c)).coupures ?? {}) as Record<string, unknown>;
+  const coupures: Record<string, number> = {};
+  for (const k of COUPURES_FOND) if (brut[k] !== undefined && brut[k] !== "" && brut[k] !== null) { const n = entier(brut[k], `nombre de ${k} €`, 0); if (n) coupures[k] = n; }
+  const total = Math.round(Object.entries(coupures).reduce((t, [k, n]) => t + Number(k) * 100 * n, 0)) / 100;
+  const db = c.env.DB;
+  const ecrire = (cle: string, valeur: string) => db.prepare("INSERT INTO reglage (cle, valeur) VALUES (?, ?) ON CONFLICT (cle) DO UPDATE SET valeur = excluded.valeur").bind(cle, valeur);
+  await db.batch(Object.keys(coupures).length
+    ? [ecrire("fond_caisse_coupures", JSON.stringify(coupures)), ecrire("fond_caisse", String(total))]
+    : [db.prepare("DELETE FROM reglage WHERE cle IN ('fond_caisse_coupures', 'fond_caisse')")]);
+  return c.json({ ok: true, total });
 });
 app.put("/reglages", async (c) => {
   const b = await corps(c);
