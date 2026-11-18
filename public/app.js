@@ -465,7 +465,7 @@ function ligneStock(p) {
 
 // « ⋯ » : fin de série et suppression sans passer par Réglages (aussi pendant un comptage).
 function menuLigne(p) {
-  if (etat.menuLigne !== p.id) return h("button", { type: "button", class: "btn-petit btn-menu", title: "Fin de série, supprimer…", "aria-label": "Plus d'actions pour " + p.nom, onclick: () => { etat.menuLigne = p.id; dessinerStock(); } }, "⋯");
+  if (etat.menuLigne !== p.id) return h("button", { type: "button", class: "btn-petit btn-menu", title: "Fin de série, supprimer…", "aria-label": "Plus d'actions pour " + p.nom, onclick: () => { etat.menuLigne = p.id; dessinerStock(); } }, "⋮");
   return h("div", { class: "menu-ligne" },
     h("button", { type: "button", class: "btn-petit", onclick: () => tenter(async () => {
       await api("/pieces/" + p.id, { method: "PATCH", body: { fin_de_serie: !p.fin_de_serie } });
@@ -964,7 +964,7 @@ function problemesPreparation(d) {
   return fige(h("div", { id: "pr-problemes" }, d.problemes.length ? h("div", { class: "question" }, h("strong", {}, "À régler dans Réglages › Recettes"), d.problemes.map((p) => h("div", {}, p))) : null));
 }
 
-// Petit menu « ⋯ » d'une ligne : les actions rares, à l'écart pour éviter un clic malheureux.
+// Petit menu « ⋮ » d'une ligne : les actions rares, à l'écart pour éviter un clic malheureux.
 function menuPoints(nom, actions) {
   // Le tableau défile horizontalement (il couperait un menu en position absolue) : le menu est placé par rapport à la fenêtre.
   const placer = (e) => {
@@ -981,7 +981,7 @@ function menuPoints(nom, actions) {
     addEventListener("scroll", fermer, true); addEventListener("pointerdown", fermer, true);
   };
   return h("details", { class: "pr-menu", ontoggle: placer },
-    h("summary", { tabindex: "-1", "aria-label": "Plus d'actions pour " + nom, title: "Plus d'actions" }, "⋯"),
+    h("summary", { tabindex: "-1", "aria-label": "Plus d'actions pour " + nom, title: "Plus d'actions" }, "⋮"),
     h("div", { class: "pr-menu-liste" }, actions.map(([texte, fn]) => h("button", { type: "button", onclick: (e) => { e.target.closest("details").open = false; fn(); } }, texte))));
 }
 
@@ -1020,7 +1020,7 @@ function sectionProduire(d) {
       h("td", { class: "num" }, champ),
       h("td", { class: "col-menu" }, menuPoints(a.nom, [["Fin de série (ne plus en produire)", () => tenter(async () => {
         await api("/pieces/" + a.piece_id, { method: "PATCH", body: { fin_de_serie: true } });
-        flash(`« ${a.nom} » passé en fin de série : il ne sera plus proposé. Pour revenir en arrière : Stock, menu ⋯ de l'article.`);
+        flash(`« ${a.nom} » passé en fin de série : il ne sera plus proposé. Pour revenir en arrière : Stock, menu ⋮ de l'article.`);
         await rafraichirPreparation();
       })]])));
   };

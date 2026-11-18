@@ -531,7 +531,7 @@ details > summary { cursor: pointer; color: var(--doux); font-size: 13px; }
 /* Préparation : menu ⋯ d'une ligne, lignes vérifiées, bouton choisi */
 .col-menu { width: 1%; text-align: right; }
 .pr-menu { position: relative; display: inline-block; }
-.pr-menu summary { list-style: none; cursor: pointer; padding: 2px 8px; border-radius: 6px; color: var(--doux); font-weight: 700; }
+.pr-menu summary { list-style: none; cursor: pointer; padding: 2px 8px; border-radius: 6px; color: var(--doux); font-weight: 700; font-size: 18px; line-height: 1; }
 .pr-menu summary::-webkit-details-marker { display: none; }
 .pr-menu summary:hover, .pr-menu[open] summary { background: var(--fond-doux); color: var(--encre); }
 .pr-menu-liste { position: fixed; z-index: 5; min-width: 240px; background: var(--carte); border: 1px solid var(--bord); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.12); padding: 4px; display: flex; flex-direction: column; }
