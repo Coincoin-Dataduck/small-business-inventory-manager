@@ -52,7 +52,7 @@ accueil.get("/accueil", async (c) => {
 
   // Date limite de commande : la plus tôt des « à commander avant » des fournitures à vérifier encore ouvertes.
   const aVerifier = plan.fournitures.filter((f) => !f.verifie);
-  const aCommander = plan.fournitures.filter((f) => f.verifie && f.a_commander);
+  const aCommander = plan.commander;
   const limites = [...aVerifier, ...aCommander].filter((l) => l.avant_le).map((l) => ({ nom: l.nom, avant_le: l.avant_le as string }));
   const limiteCommande = limites.reduce<string | null>((m, l) => (!m || l.avant_le < m ? l.avant_le : m), null);
 

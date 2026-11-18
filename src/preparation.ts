@@ -1,6 +1,6 @@
 // Écran de préparation (décision du 18/11/2026, spec §3) :
-// 1. quoi produire (conseil + nombre décidé), 2. fournitures à vérifier puis commander,
-// 3. ce qu'on a produit (checklist), 4. comptage avant (page Compter).
+// 1. quoi produire (conseil + nombre décidé), 2. fournitures à vérifier, 3. commander,
+// 4. ce qu'on a produit (checklist). Le comptage avant reste dans Compter (jalon de l'Accueil).
 // Pas de suivi des étapes : une recette dit seulement ce qu'il faut pour en faire.
 import { Hono } from "hono";
 import { Env, STOCK_SQL, erreur, entier, corps, instructionsComptage } from "./outils";
@@ -130,7 +130,7 @@ async function conseils(db: D1Database, articles: P[]) {
     else {
       const vise = Math.ceil(meilleur.q * (1 + reg.marge) - 1e-9);
       conseil = Math.max(0, vise - stock);
-      calcul = `${meilleur.q} vendus (${meilleur.salon}) + ${pct} % = ${vise} − ${stock} en stock`;
+      calcul = `${meilleur.q} vendu${meilleur.q > 1 ? "s" : ""} (${meilleur.salon}) + ${pct} % = ${vise} − ${stock} en stock`;
     }
     return [a.id, { conseil, calcul, meilleur, dernier: d }];
   }));
@@ -171,38 +171,52 @@ export async function lirePreparation(db: D1Database) {
   const lots = new Map<number, number[]>();
   for (const l of lotsR.results) (lots.get(l.piece_id) ?? lots.set(l.piece_id, []).get(l.piece_id)!).push(l.taille);
   const premier = salons[0].date_debut;
-  const ligneF = (id: number, il_en_faut: number | null, revente = false) => {
+  const avantLe = (p: P) => p.delai_jours !== null ? moinsJours(premier, p.delai_jours) : null;
+  const ligneF = (id: number, il_en_faut: number | null) => {
     const p = parId.get(id)!;
     const v = verifs.get(id);
     let etatL: string;
     if (p.suivi === "sans_quantite") etatL = "sans";
     else if (il_en_faut === null) etatL = "inconnu_q";
     else if (!p.compte) etatL = "jamais";
-    else if (revente) etatL = "revente";
     else if (il_en_faut > p.stock) etatL = "manque";
     else if (p.seuil !== null && p.stock - il_en_faut < p.seuil) etatL = "bas";
     else etatL = "ok";
     const route = enRoute.get(id) ?? 0;
     let a_commander: number | null = null, lot: { nombre: number; taille: number } | null = null;
     if (v && p.suivi === "quantite" && il_en_faut !== null) {
-      const manque = revente ? il_en_faut - route : il_en_faut - (v.quantite ?? 0) - route;
+      const manque = il_en_faut - (v.quantite ?? 0) - route;
       if (manque > 0) { const a = arrondirAuLot(manque, lots.get(id) ?? []); a_commander = a.quantite; lot = a.lots; }
     }
+    // Sans quantité : « à racheter » (quantite = 0) → 1 à commander, sauf s'il y en a déjà en route.
+    if (v && p.suivi === "sans_quantite" && v.quantite === 0 && route === 0) a_commander = 1;
     return {
       piece_id: id, nom: p.nom, famille: p.famille, niveau: p.niveau, suivi: p.suivi, il_en_faut, stock: p.stock, compte: !!p.compte,
-      seuil: p.seuil, etat: etatL, revente, verifie: !!v, verifie_quantite: v?.quantite ?? null, en_route: route,
-      a_commander, lot, mode_achat: p.mode_achat, recup: p.niveau === "recup" || p.mode_achat === "jamais",
-      avant_le: p.delai_jours !== null ? moinsJours(premier, p.delai_jours) : null,
+      seuil: p.seuil, etat: etatL, revente: false, verifie: !!v, verifie_quantite: v?.quantite ?? null, en_route: route,
+      a_commander, lot, mode_achat: p.mode_achat, recup: p.niveau === "recup" || p.mode_achat === "jamais", avant_le: avantLe(p),
     };
   };
   const fournitures = [
     ...[...b.besoin].map(([id, q]) => ligneF(id, plafond(q))),
     ...[...b.quantiteInconnue].filter((id) => !b.besoin.has(id)).map((id) => ligneF(id, null)),
     ...[...b.sansQuantite].map((id) => ligneF(id, null)),
-    ...b.achetesRevendus.map((x) => ligneF(x.piece_id, x.quantite, true)),
   ];
-  const ordreEtat = ["manque", "jamais", "revente", "bas", "inconnu_q", "ok", "sans"];
+  const ordreEtat = ["manque", "jamais", "bas", "inconnu_q", "ok", "sans"];
   fournitures.sort((x, y) => ordreEtat.indexOf(x.etat) - ordreEtat.indexOf(y.etat) || x.nom.localeCompare(y.nom));
+
+  // 3. Commander : fournitures vérifiées qui manquent + articles achetés puis revendus (le nombre décidé au 1, sans vérification).
+  const revendus = b.achetesRevendus.map((x) => {
+    const p = parId.get(x.piece_id)!;
+    const route = enRoute.get(x.piece_id) ?? 0;
+    const manque = x.quantite - route;
+    const a = manque > 0 ? arrondirAuLot(manque, lots.get(x.piece_id) ?? []) : null;
+    return {
+      piece_id: x.piece_id, nom: p.nom, famille: p.famille, niveau: p.niveau, suivi: p.suivi, il_en_faut: x.quantite, stock: p.stock, compte: !!p.compte,
+      seuil: p.seuil, etat: "revente", revente: true, verifie: true, verifie_quantite: null, en_route: route,
+      a_commander: a ? a.quantite : null, lot: a ? a.lots : null, mode_achat: p.mode_achat, recup: false, avant_le: avantLe(p),
+    };
+  });
+  const commander = [...fournitures.filter((f) => f.verifie && f.a_commander), ...revendus.filter((f) => f.a_commander)];
 
   // 3. Checklist
   const faits = new Map(fai.results.map((f) => [f.piece_id, f.quantite]));
@@ -213,7 +227,7 @@ export async function lirePreparation(db: D1Database) {
   ];
   return {
     preparation: prep, salons, debut: moinsJours(premier, 15), aujourdhui: aujourdhui(),
-    articles: lignes, fournitures, checklist, commandes: cmd.results, problemes: b.problemes,
+    articles: lignes, fournitures, commander, checklist, commandes: cmd.results, problemes: b.problemes,
   };
 }
 
@@ -251,24 +265,21 @@ preparation.put("/preparation/:id/production/lot", async (c) => {
   return c.json({ ok: true });
 });
 
-// 2. Vérifier une fourniture : « j'en ai N » (= comptage), « OK » (le chiffre est juste), ou « il en reste » (sans quantité).
+// 2. Vérifier une fourniture : « j'en ai N » (= comptage), ou, sans quantité, « il en reste » / « à racheter ».
 preparation.put("/preparation/:id/verif", async (c) => {
   const db = c.env.DB;
   const id = await prepId(db, c.req.param("id"));
   const b = await corps(c);
   const piece_id = entier(b.piece_id, "fourniture", 1);
-  const p = await db.prepare(`SELECT p.suivi, ${STOCK_SQL} AS stock, EXISTS (SELECT 1 FROM comptage_ligne cl WHERE cl.piece_id = p.id) AS compte FROM piece p WHERE p.id = ?`)
-    .bind(piece_id).first<{ suivi: string; stock: number; compte: number }>();
+  const p = await db.prepare("SELECT suivi FROM piece WHERE id = ?").bind(piece_id).first<{ suivi: string }>();
   if (!p) erreur("Fourniture introuvable.", 404);
   let quantite: number | null = null;
   const stmts: D1PreparedStatement[] = [];
   if (p.suivi === "quantite") {
-    if (b.quantite === null || b.quantite === undefined || b.quantite === "") {
-      if (!p.compte) erreur("Elle n'a jamais été comptée : indiquez combien vous en avez.");
-      quantite = Math.max(0, p.stock);
-    } else quantite = entier(b.quantite, "quantité", 0);
+    if (b.quantite === null || b.quantite === undefined || b.quantite === "") erreur("Indiquez combien vous en avez.");
+    quantite = entier(b.quantite, "quantité", 0);
     stmts.push(...instructionsComptage(db, [{ piece_id, compte: quantite }], "libre", null));
-  }
+  } else quantite = b.a_racheter ? 0 : null;
   stmts.push(db.prepare("INSERT INTO prep_verif (prep_id, piece_id, quantite) VALUES (?, ?, ?) ON CONFLICT (prep_id, piece_id) DO UPDATE SET quantite = excluded.quantite, le = excluded.le")
     .bind(id, piece_id, quantite));
   await db.batch(stmts);

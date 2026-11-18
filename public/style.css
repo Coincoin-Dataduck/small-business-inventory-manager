@@ -527,3 +527,22 @@ details > summary { cursor: pointer; color: var(--doux); font-size: 13px; }
 .rc-ligne > span { flex: 1 1 auto; min-width: 0; }
 .rc-ajout input.rc-chercher { flex: 1 1 auto; min-width: 0; min-height: 34px; border: 1px solid var(--bord); border-radius: 8px; padding: 0 8px; background: #fff; }
 @media (max-width: 760px) { .rc-grille { grid-template-columns: 1fr; } }
+
+/* Préparation : menu ⋯ d'une ligne, lignes vérifiées, bouton choisi */
+.col-menu { width: 1%; text-align: right; }
+.pr-menu { position: relative; display: inline-block; }
+.pr-menu summary { list-style: none; cursor: pointer; padding: 2px 8px; border-radius: 6px; color: var(--doux); font-weight: 700; }
+.pr-menu summary::-webkit-details-marker { display: none; }
+.pr-menu summary:hover, .pr-menu[open] summary { background: var(--fond-doux); color: var(--encre); }
+.pr-menu-liste { position: fixed; z-index: 5; min-width: 240px; background: var(--carte); border: 1px solid var(--bord); border-radius: 8px; box-shadow: 0 6px 18px rgba(0,0,0,.12); padding: 4px; display: flex; flex-direction: column; }
+.pr-menu-liste button { border: 0; background: transparent; text-align: left; padding: 8px 10px; border-radius: 6px; cursor: pointer; color: var(--encre); font: inherit; }
+.pr-menu-liste button:hover { background: var(--fond-doux); }
+.pr-verifiee td:first-child span:first-child { color: var(--ok); }
+.btn-petit.pr-choisi { background: var(--encre); color: var(--carte); border-color: var(--encre); }
+.pr-autres { padding: 0; }
+.pr-bascule { border: 0; background: transparent; padding: 8px 14px; cursor: pointer; color: var(--doux); font: inherit; font-size: 13px; }
+
+/* Réglages : onglets */
+.onglets { display: flex; gap: 4px; border-bottom: 1px solid var(--bord); }
+.onglet { padding: 8px 14px; color: var(--doux); text-decoration: none; border-bottom: 3px solid transparent; font-weight: 600; }
+.onglet[aria-current="page"] { color: var(--encre); border-bottom-color: var(--vert); }

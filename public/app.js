@@ -9,7 +9,6 @@ const PAGES = [
   { id: "accueil", label: "Accueil" },
   { id: "stock", label: "Stock" },
   { id: "preparation", label: "Préparation" },
-  { id: "recettes", label: "Recettes" },
   { id: "salons", label: "Salons" },
   { id: "questions", label: "Questions" },
   { id: "reglages", label: "Réglages" },
@@ -64,11 +63,12 @@ const etat = {
   params: [], salons: null, salonEdition: null, objectifs: null, plan: null, comptageAvant: null,
 };
 
-// Adresses : #stock, #stock/avant/<salon>, #preparation, #recettes, #salons, #bilan/<salon>, #reglages
+// Adresses : #stock, #stock/avant/<salon>, #preparation, #salons, #bilan/<salon>, #reglages, #reglages/recettes[/<cible>]
 function pageCourante() {
   const [id, ...params] = location.hash.replace("#", "").split("/");
   etat.params = params;
   if (["atelier", "achats", "objectifs"].includes(id)) return "preparation"; // anciennes adresses
+  if (id === "recettes") { etat.params = ["recettes", ...params]; return "reglages"; }
   if (id === "bilan" && params[0]) return "bilan";
   return PAGES.some((p) => p.id === id && !p.bientot) ? id : "accueil";
 }
@@ -98,7 +98,6 @@ async function afficher() {
     if (etat.page === "stock") await pageStock();
     if (etat.page === "reglages") await pageReglages();
     if (etat.page === "preparation") await pagePreparation();
-    if (etat.page === "recettes") await pageRecettes();
     if (etat.page === "salons") await pageSalons();
     if (etat.page === "questions") await pageQuestions();
     if (etat.page === "bilan") await pageBilan(Number(etat.params[0]));
@@ -335,7 +334,7 @@ function ligneProduit(p, variantes) {
       h("b", {}, p.produit),
       h("span", { class: "note" }, `${variantes.length} variante${variantes.length > 1 ? "s" : ""}` + (suivis.length ? ` · ${total} en tout` : "")),
       ouvert ? ajout : h("button", { type: "button", class: "btn-petit", onclick: () => { etat.ajoutVariante = p.produit_id; dessinerStock(); } }, "+ variante"),
-      etat.comptage ? null : h("a", { class: "btn-petit lien-recette", href: "#recettes/p" + p.produit_id }, "Recette"))));
+      etat.comptage ? null : h("a", { class: "btn-petit lien-recette", href: "#reglages/recettes/p" + p.produit_id }, "Recette"))));
 }
 
 const variantesDe = (f) => (etat.stock.find((x) => x.id === f.id)?.variantes ?? []).join(", ");
@@ -699,7 +698,15 @@ async function sauverComptage() {
 }
 
 // ───────────── Réglages : familles, articles et fournitures ─────────────
+// Réglages : deux onglets, « Général » et « Recettes ».
+function ongletsReglages(actif) {
+  return h("nav", { class: "onglets", "aria-label": "Réglages" },
+    [["general", "Général", "#reglages"], ["recettes", "Recettes", "#reglages/recettes"]].map(([id, t, href]) =>
+      h("a", { href, class: "onglet", "aria-current": actif === id ? "page" : null }, t)));
+}
+
 async function pageReglages() {
+  if (etat.params[0] === "recettes") { await pageRecettes(etat.params[1]); return; }
   [etat.familles, etat.stock, etat.etapes, etat.correspondances, etat.reglages, etat.retires] = await Promise.all([api("/familles"), api("/stock"), api("/etapes"), api("/correspondances"), api("/reglages"), api("/pieces/retires")]);
   dessinerReglages();
 }
@@ -790,8 +797,7 @@ function dessinerReglages() {
       h("td", { class: "num" }, h("button", { class: "btn-petit", onclick: () => tenter(async () => {
         await api("/pieces/" + p.id, { method: "PATCH", body: { retire: false } }); flash(`« ${p.nom} » remis dans le stock.`); await pageReglages();
       }) }, "Remettre dans le stock"))))))) : null;
-  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, sectionFondCaisse(), sectionThermometre(), familles, pieces, retires,
-    h("section", { class: "carte" }, h("h2", {}, "Recettes"), h("div", { class: "vide" }, "Les recettes ont leur propre page : ", h("a", { href: "#recettes" }, "Recettes"), ".")),
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, ongletsReglages("general"), sectionFondCaisse(), sectionThermometre(), familles, pieces, retires,
     sectionCorrespondances()));
 }
 
@@ -862,30 +868,62 @@ function lignePieceReglage(p) {
 
 
 // ───────────── Préparation ─────────────
-// Décision du 18/11/2026 (maquette : docs/maquette/preparation.html) :
-// 1. quoi produire (conseil prérempli, on tape le nombre), 2. fournitures à vérifier puis commander,
-// 3. ce qu'on a produit (checklist), 4. comptage avant (page Compter).
+// Décisions du 18/11/2026 : 1. quoi produire (conseil, on tape le nombre), 2. fournitures à vérifier,
+// 3. commander, 4. ce qu'on a produit (checklist). Le comptage avant reste dans Compter (jalon de l'Accueil).
+// Une saisie s'enregistre à la sortie du champ (Tab, Entrée, clic ailleurs) ; rien d'autre ne bouge :
+// seules les lignes dont les chiffres ont changé sont redessinées, le curseur reste où on l'a mis.
 async function pagePreparation() {
   etat.prep = await api("/preparation");
+  etat.prepOuverts ??= new Set();
+  // Les lignes visibles du 1 sont fixées à l'ouverture de la page : taper un nombre ne fait pas changer une ligne de place.
+  etat.prepVues = new Set((etat.prep.articles ?? []).filter((a) => a.conseil > 0 || a.stock <= 0 || (a.decide && a.a_produire > 0)).map((a) => a.piece_id));
   dessinerPreparation();
 }
 
-async function rechargerPreparation(focus) {
-  const y = window.scrollY;
+// Après un enregistrement : relit, puis remplace uniquement ce qui a changé, sans toucher au champ où se trouve le curseur.
+async function rafraichirPreparation() {
   etat.prep = await api("/preparation");
-  dessinerPreparation();
-  window.scrollTo(0, y);
-  if (focus) document.getElementById(focus)?.focus();
+  for (const neuf of sectionsPreparation(etat.prep)) {
+    const ancien = document.getElementById(neuf.id);
+    if (!ancien || ancien._html === neuf._html) continue;
+    const actif = document.activeElement;
+    if (!ancien.contains(actif)) { ancien.replaceWith(neuf); continue; }
+    const cles = (el) => [...el.querySelectorAll("[data-cle]")].map((x) => x.dataset.cle).join("|");
+    if (cles(ancien) !== cles(neuf)) { remplacerEnGardantLeCurseur(ancien, neuf, actif); continue; }
+    for (const el of [...neuf.querySelectorAll("[data-cle]")]) {
+      const o = ancien.querySelector(`[data-cle="${CSS.escape(el.dataset.cle)}"]`);
+      if (o && o._html !== el._html) remplacerEnGardantLeCurseur(o, el, actif);
+    }
+    ancien._html = neuf._html;
+  }
 }
+
+// Remplace un bloc. Si le curseur y est : on le remet dans le même champ, avec ce qui y est tapé ;
+// mais si l'on est en train d'y taper autre chose que ce qui est enregistré, on ne touche pas à la ligne.
+function remplacerEnGardantLeCurseur(ancien, neuf, actif) {
+  if (!ancien.contains(actif) || !actif.id) { ancien.replaceWith(neuf); return; }
+  const cible = neuf.querySelector("#" + CSS.escape(actif.id)) ?? (neuf.id === actif.id ? neuf : null);
+  const tape = actif.value;
+  if (ancien.querySelector("[data-cle]") === null && cible && cible.value !== undefined && cible.value !== tape) return;
+  const pos = actif.selectionStart;
+  ancien.replaceWith(neuf);
+  const el = document.getElementById(actif.id);
+  if (!el) return;
+  el.focus();
+  if (tape !== undefined && el.value !== tape) el.value = tape;
+  try { el.setSelectionRange(pos, pos); } catch {}
+}
+
+// Mémorise le HTML d'un élément au moment où il est construit (pour savoir s'il a changé).
+function fige(el) { el._html = el.innerHTML; for (const x of el.querySelectorAll("[data-cle]")) x._html = x.innerHTML; return el; }
 
 const ETATS_FOURNITURE = {
   manque: (f) => ["pr-alerte", `manque ${f.il_en_faut - Math.max(0, f.stock)}`],
   jamais: () => ["pr-inconnu", "jamais compté"],
-  revente: (f) => ["pr-inconnu", `à racheter · ${Math.max(0, f.stock)} en stock`],
   bas: (f) => ["pr-bas", `zone critique : il en restera ${f.stock - f.il_en_faut} (alerte sous ${f.seuil})`],
   inconnu_q: () => ["pr-inconnu", "quantité inconnue (rendement à renseigner)"],
   ok: () => ["pr-ok", "devrait suffire"],
-  sans: () => ["pr-sans", "pas de quantité : vérifie qu'il en reste"],
+  sans: () => ["pr-sans", "vérifie qu'il en reste"],
 };
 
 function dessinerPreparation() {
@@ -897,29 +935,65 @@ function dessinerPreparation() {
       "Aucun salon à venir. Ajoutez le prochain salon dans ", h("a", { href: "#salons" }, "Salons"), " : la préparation commence 15 jours avant.")));
     return;
   }
-  const prep = d.preparation;
+  page.replaceChildren(h("div", { class: "pr" },
+    h("p", { class: "note", style: "margin:0" }, d.salons.map((s) => `${s.nom} (${datesSalon(s)})`).join(" · "),
+      ` · la préparation commence 15 jours avant, le ${fmtDate(d.debut)}.`),
+    ...sectionsPreparation(d)));
+}
+
+function sectionsPreparation(d) {
+  return [frisePreparation(d), problemesPreparation(d), sectionProduire(d), sectionVerifier(d), sectionCommander(d), sectionChecklist(d)];
+}
+
+function frisePreparation(d) {
   const toutDecide = d.articles.every((a) => a.decide);
   const aVerifier = d.fournitures.filter((f) => !f.verifie).length;
   const checkFaits = d.checklist.filter((x) => x.fait !== null).length;
   const tempo = [
     ["pr-produire", "1. Quoi produire", toutDecide ? "liste arrêtée" : "vous décidez", toutDecide],
     ["pr-verifier", "2. Fournitures à vérifier", d.fournitures.length ? (aVerifier ? `${aVerifier} à vérifier` : "tout est vérifié") : "rien à vérifier", d.fournitures.length > 0 && !aVerifier],
-    ["pr-checklist", "3. Ce qu'on a produit", d.checklist.length ? `${checkFaits} / ${d.checklist.length}` : "rien à produire", d.checklist.length > 0 && checkFaits === d.checklist.length],
-    ["pr-compter", "4. Compter avant de partir", "avant le " + fmtDate(d.salons[0].date_debut), false],
+    ["pr-commander", "3. Commander", d.commander.length ? `${d.commander.length} à commander` : d.commandes.length ? `${d.commandes.length} en attente` : aVerifier ? "après vérification" : "rien à commander", !aVerifier && !d.commander.length && !d.commandes.length],
+    ["pr-checklist", "4. Ce qu'on a produit", d.checklist.length ? `${checkFaits} / ${d.checklist.length}` : "rien à produire", d.checklist.length > 0 && checkFaits === d.checklist.length],
   ];
-  page.replaceChildren(h("div", { class: "pr" },
-    h("p", { class: "note", style: "margin:0" }, d.salons.map((s) => `${s.nom} (${datesSalon(s)})`).join(" · "),
-      ` · la préparation commence 15 jours avant, le ${fmtDate(d.debut)}.`),
-    h("nav", { class: "pr-frise", "aria-label": "Les quatre temps de la préparation" },
-      tempo.map(([id, t, s, fait]) => h("a", { href: "#preparation", class: fait ? "fait" : null, onclick: (e) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: "smooth" }); } },
-        h("b", {}, t), h("span", {}, s)))),
-    d.problemes.length ? h("div", { class: "question" }, h("strong", {}, "À régler dans Recettes"), d.problemes.map((p) => h("div", {}, p))) : null,
-    sectionProduire(d), sectionVerifier(d), sectionChecklist(d),
-    h("section", { class: "carte pr-temps", id: "pr-compter" },
-      h("div", { class: "pr-tete" }, h("span", { class: "pr-num" }, "4"), h("h2", {}, "Compter avant de partir")),
-      h("p", { class: "pr-regle" }, "Le comptage d'avant salon recale le stock des articles. Pas de comptage au retour."),
-      h("div", {}, h("a", { class: "btn", href: "#stock/avant/" + prep.id, style: "display:inline-flex;align-items:center;text-decoration:none" }, "Faire le comptage avant"))),
-  ));
+  return fige(h("nav", { class: "pr-frise", id: "pr-frise", "aria-label": "Les quatre temps de la préparation" },
+    tempo.map(([id, t, s, fait]) => h("a", { href: "#preparation", class: fait ? "fait" : null, onclick: (e) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: "smooth" }); } },
+      h("b", {}, t), h("span", {}, s)))));
+}
+
+function problemesPreparation(d) {
+  return fige(h("div", { id: "pr-problemes" }, d.problemes.length ? h("div", { class: "question" }, h("strong", {}, "À régler dans Réglages › Recettes"), d.problemes.map((p) => h("div", {}, p))) : null));
+}
+
+// Petit menu « ⋯ » d'une ligne : les actions rares, à l'écart pour éviter un clic malheureux.
+function menuPoints(nom, actions) {
+  // Le tableau défile horizontalement (il couperait un menu en position absolue) : le menu est placé par rapport à la fenêtre.
+  const placer = (e) => {
+    const d = e.target;
+    if (!d.open) return;
+    for (const autre of document.querySelectorAll(".pr-menu[open]")) if (autre !== d) autre.open = false;
+    const r = d.querySelector("summary").getBoundingClientRect(), liste = d.querySelector(".pr-menu-liste");
+    // Un parent avec transform devient la référence du position:fixed : on corrige par sa position.
+    liste.style.left = "0px"; liste.style.top = "0px";
+    const o = liste.getBoundingClientRect();
+    liste.style.left = Math.max(8, r.right - liste.offsetWidth) - o.left + "px";
+    liste.style.top = r.bottom + 4 - o.top + "px";
+    const fermer = (ev) => { if (ev.type === "scroll" || !d.contains(ev.target)) { d.open = false; removeEventListener("scroll", fermer, true); removeEventListener("pointerdown", fermer, true); } };
+    addEventListener("scroll", fermer, true); addEventListener("pointerdown", fermer, true);
+  };
+  return h("details", { class: "pr-menu", ontoggle: placer },
+    h("summary", { tabindex: "-1", "aria-label": "Plus d'actions pour " + nom, title: "Plus d'actions" }, "⋯"),
+    h("div", { class: "pr-menu-liste" }, actions.map(([texte, fn]) => h("button", { type: "button", onclick: (e) => { e.target.closest("details").open = false; fn(); } }, texte))));
+}
+
+// Champ numérique enregistré à la sortie (Tab, Entrée, clic ailleurs). Entrée ne déplace pas le curseur.
+function champNombre(attrs, enregistrer) {
+  return h("input", { class: "pr-q", type: "text", inputmode: "numeric", autocomplete: "off", ...attrs,
+    onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); e.target.dispatchEvent(new Event("change")); } },
+    onchange: (e) => {
+      const el = e.target;
+      if (el.value === el._dernier) return;
+      tenter(async () => { await enregistrer(el.value.trim()); el._dernier = el.value; await rafraichirPreparation(); });
+    } });
 }
 
 function sectionProduire(d) {
@@ -930,134 +1004,150 @@ function sectionProduire(d) {
     if (!f) familles.push(f = { id: a.famille_id, nom: a.famille, lignes: [] });
     f.lignes.push(a);
   }
-  const vendus = (x) => x ? String(x.q) : "—";
   const ligne = (a) => {
-    const id = "prod-" + a.piece_id;
-    const champ = h("input", { class: "pr-q", id, type: "text", inputmode: "numeric", value: String(a.a_produire), "aria-label": (a.achete ? "À racheter : " : "À produire : ") + a.nom,
-      onkeydown: (e) => { if (e.key === "Enter") e.target.blur(); },
-      onchange: (e) => tenter(async () => {
-        const v = e.target.value.trim();
+    const champ = champNombre({ id: "prod-" + a.piece_id, value: String(a.a_produire), "aria-label": (a.achete ? "À racheter : " : "À produire : ") + a.nom },
+      async (v) => {
         if (v !== "" && !/^\d+$/.test(v)) throw new Error("Un nombre entier, ou vide pour revenir au conseil.");
         await api(`/preparation/${prep.id}/production`, { method: "PUT", body: { piece_id: a.piece_id, a_produire: v === "" ? null : Number(v) } });
-        const suivant = [...document.querySelectorAll(".pr-q")].map((x) => x.id); const i = suivant.indexOf(id);
-        await rechargerPreparation(suivant[i + 1]);
-      }) });
-    return h("tr", {},
+      });
+    champ._dernier = String(a.a_produire);
+    return h("tr", { "data-cle": "a" + a.piece_id },
       h("td", {}, h("span", { style: "font-weight:600" }, a.nom), " ",
-        a.stock <= 0 ? h("span", { class: "pr-pill pr-alerte" }, "épuisé") : a.conseil > 0 ? h("span", { class: "pr-pill pr-bas" }, "à refaire") : null),
+        a.stock <= 0 ? h("span", { class: "pr-pill pr-alerte" }, "épuisé") : a.conseil > 0 ? h("span", { class: "pr-pill pr-bas" }, "à refaire") : null,
+        a.achete ? h("span", { class: "pr-calc" }, " · acheté puis revendu") : null),
       h("td", { class: "num" }, a.stock),
-      h("td", { class: "num cache-tel" }, a.modele_non_precise ? "—" : vendus(a.dernier)),
-      h("td", { class: "num cache-tel" }, a.meilleur && !a.modele_non_precise ? h("span", { title: a.meilleur.salon }, `${a.meilleur.q} · ${a.meilleur.salon}`) : "—"),
-      h("td", { class: "pr-calc" }, a.conseil ? `${a.conseil} · ` : "", a.calcul),
-      h("td", { class: "num" }, h("div", { class: "pr-cellule" }, champ, h("span", { class: "pr-calc" }, a.achete ? "à racheter" : a.decide ? "" : "conseil"))));
+      h("td", { class: "pr-calc" }, a.calcul),
+      h("td", { class: "num" }, champ),
+      h("td", { class: "col-menu" }, menuPoints(a.nom, [["Fin de série (ne plus en produire)", () => tenter(async () => {
+        await api("/pieces/" + a.piece_id, { method: "PATCH", body: { fin_de_serie: true } });
+        flash(`« ${a.nom} » passé en fin de série : il ne sera plus proposé. Pour revenir en arrière : Stock, menu ⋯ de l'article.`);
+        await rafraichirPreparation();
+      })]])));
   };
   const corps = familles.flatMap((f) => {
-    const vues = f.lignes.filter((a) => a.a_produire > 0 || a.conseil > 0 || a.stock <= 0);
+    const vues = f.lignes.filter((a) => etat.prepVues.has(a.piece_id));
     const autres = f.lignes.filter((a) => !vues.includes(a));
+    const cle = "autres-" + f.id;
+    const ouvert = etat.prepOuverts.has(cle);
+    // Les autres lignes sont dans le même tableau (colonnes alignées), masquées ou montrées sans rien redessiner.
+    const basculer = (e) => {
+      const o = !etat.prepOuverts.has(cle);
+      o ? etat.prepOuverts.add(cle) : etat.prepOuverts.delete(cle);
+      for (const tr of document.querySelectorAll(`#pr-produire tr[data-groupe="${cle}"]`)) tr.hidden = !o;
+      e.currentTarget.textContent = (o ? "▾ " : "▸ ") + texteAutres;
+      e.currentTarget.setAttribute("aria-expanded", String(o));
+    };
+    const texteAutres = `${autres.length} autre${autres.length > 1 ? "s" : ""} : rien de conseillé`;
     return [
-      h("tr", { class: "pr-famille" }, h("td", { colspan: "6" }, f.nom, f.lignes[0].modele_non_precise ? h("span", { class: "pr-calc" }, " · la caisse ne dit pas le modèle : on compare les stocks entre eux") : null)),
+      h("tr", { class: "pr-famille" }, h("td", { colspan: "5" }, f.nom, f.lignes[0].modele_non_precise ? h("span", { class: "pr-calc" }, " · la caisse ne dit pas le modèle : on compare les stocks entre eux") : null)),
       ...vues.map(ligne),
-      autres.length ? h("tr", {}, h("td", { colspan: "6" }, h("details", {},
-        h("summary", {}, `${autres.length} autre${autres.length > 1 ? "s" : ""} : rien de conseillé`),
-        h("table", { class: "tbl" }, h("tbody", {}, autres.map(ligne)))))) : null,
+      autres.length ? h("tr", {}, h("td", { colspan: "5", class: "pr-autres" }, h("button", { type: "button", class: "pr-bascule", "aria-expanded": String(ouvert), onclick: basculer }, (ouvert ? "▾ " : "▸ ") + texteAutres))) : null,
+      ...autres.map((a) => { const tr = ligne(a); tr.dataset.groupe = cle; tr.hidden = !ouvert; return tr; }),
     ];
   });
-  const dernier = d.articles.find((a) => a.dernier)?.dernier?.salon;
   const total = (filtre) => d.articles.filter(filtre).reduce((t, a) => t + a.a_produire, 0);
-  return h("section", { class: "carte pr-temps", id: "pr-produire" },
+  const toutDecide = d.articles.every((a) => a.decide);
+  return fige(h("section", { class: "carte pr-temps", id: "pr-produire" },
     h("div", { class: "pr-tete" }, h("span", { class: "pr-num" }, "1"), h("h2", {}, "Quoi produire")),
-    h("p", { class: "pr-regle" }, h("strong", {}, "Conseil"), " : ce que l'article a vendu à son meilleur salon, plus la marge, moins le stock. Familles dont la caisse ne dit pas le modèle (tampons) : on remonte au niveau des autres modèles ceux qui en ont la moitié ou moins. La case est préremplie avec le conseil : c'est vous qui décidez (vide = revenir au conseil)."),
+    h("p", { class: "pr-regle" }, h("strong", {}, "Conseil"), " : vendus au meilleur salon + la marge, moins le stock. Tampons (la caisse ne dit pas le modèle) : on remonte au niveau des autres modèles ceux qui en ont la moitié ou moins. La case contient le conseil : tapez le nombre que vous voulez (vide = revenir au conseil)."),
     h("div", { class: "pr-defile" }, h("table", { class: "tbl" },
-      h("thead", {}, h("tr", {}, ["Article", "Stock", dernier ? "Vendus · " + dernier : "Dernier salon", "Meilleur salon", "Conseil", "À produire"].map((t, i) => h("th", { class: [1, 2, 3, 5].includes(i) ? "num" + (i === 2 || i === 3 ? " cache-tel" : "") : null }, t)))),
+      h("thead", {}, h("tr", {}, ["Article", "Stock", "Conseil", "À produire", ""].map((t, i) => h("th", { class: i === 1 || i === 3 ? "num" : null }, t)))),
       h("tbody", {}, corps))),
-    h("div", { class: "pr-pied" },
+    h("div", { class: "pr-pied", "data-cle": "pied-produire" },
       h("span", { class: "note" }, `À produire : ${total((a) => !a.achete)} · à racheter : ${total((a) => a.achete)}`),
-      h("button", { class: d.articles.every((a) => a.decide) ? "btn-sec" : "btn", onclick: () => tenter(async () => {
+      h("button", { class: toutDecide ? "btn-sec" : "btn", onclick: () => tenter(async () => {
         await api(`/preparation/${prep.id}/production/lot`, { method: "PUT", body: { lignes: d.articles.map((a) => ({ piece_id: a.piece_id, a_produire: a.a_produire })) } });
         flash("Liste arrêtée. Vous pouvez encore changer un nombre.");
-        await rechargerPreparation();
-      }) }, d.articles.every((a) => a.decide) ? "Liste arrêtée ✓" : "La liste est arrêtée")));
+        await rafraichirPreparation();
+      }) }, toutDecide ? "Liste arrêtée ✓" : "La liste est arrêtée"))));
 }
 
 function sectionVerifier(d) {
   const prep = d.preparation;
+  const verifier = (f, body) => api(`/preparation/${prep.id}/verif`, { method: "PUT", body: { piece_id: f.piece_id, ...body } });
   const ligne = (f) => {
     const [cls, txt] = ETATS_FOURNITURE[f.etat](f);
-    const id = "verif-" + f.piece_id;
-    const champ = f.suivi === "quantite" && !f.verifie
-      ? h("input", { class: "pr-q", id, type: "text", inputmode: "numeric", placeholder: f.compte ? String(Math.max(0, f.stock)) : "combien ?", "aria-label": "J'en ai : " + f.nom,
-          onkeydown: (e) => { if (e.key === "Enter") valider(); } })
-      : null;
-    const valider = () => tenter(async () => {
-      const v = champ ? champ.value.trim() : "";
-      if (v !== "" && !/^\d+$/.test(v)) throw new Error("Un nombre entier.");
-      await api(`/preparation/${prep.id}/verif`, { method: "PUT", body: { piece_id: f.piece_id, quantite: v === "" ? null : Number(v) } });
-      const suivant = [...document.querySelectorAll("#pr-verifier .pr-q")].map((x) => x.id); const i = suivant.indexOf(id);
-      await rechargerPreparation(suivant[i + 1]);
-    });
-    return h("tr", { class: f.verifie ? "pr-faite" : null },
-      h("td", {}, h("span", { style: "font-weight:600" }, f.nom), h("span", { class: "pr-calc" }, " · " + f.famille + (f.recup ? " · récup" : ""))),
+    let saisie;
+    if (f.suivi === "quantite") {
+      saisie = champNombre({ id: "verif-" + f.piece_id, value: f.verifie ? String(f.verifie_quantite) : "", placeholder: "combien ?", "aria-label": "J'en ai : " + f.nom },
+        async (v) => {
+          if (v === "") { if (f.verifie) await api(`/preparation/${prep.id}/verif/${f.piece_id}`, { method: "DELETE" }); return; }
+          if (!/^\d+$/.test(v)) throw new Error("Un nombre entier.");
+          await verifier(f, { quantite: Number(v) });
+        });
+      saisie._dernier = f.verifie ? String(f.verifie_quantite) : "";
+    } else {
+      const choix = f.verifie ? (f.verifie_quantite === 0 ? "racheter" : "reste") : null;
+      const bouton = (val, texte, body) => h("button", { type: "button", class: "btn-petit" + (choix === val ? " pr-choisi" : ""), "aria-pressed": choix === val ? "true" : "false",
+        onclick: () => tenter(async () => {
+          if (choix === val) await api(`/preparation/${prep.id}/verif/${f.piece_id}`, { method: "DELETE" });
+          else await verifier(f, body);
+          await rafraichirPreparation();
+        }) }, texte);
+      saisie = h("div", { class: "actions-ligne" }, bouton("reste", "il en reste", {}), bouton("racheter", "à racheter", { a_racheter: true }));
+    }
+    return h("tr", { "data-cle": "f" + f.piece_id, class: f.verifie ? "pr-verifiee" : null },
+      h("td", {}, h("span", { style: "font-weight:600" }, f.verifie ? "✓ " : "", f.nom), h("span", { class: "pr-calc" }, " · " + f.famille + (f.recup ? " · récup" : ""))),
       h("td", { class: "num" }, f.il_en_faut === null ? (f.suivi === "quantite" ? "?" : "un peu") : f.il_en_faut),
       h("td", { class: "num" }, f.suivi !== "quantite" ? "—" : f.compte ? f.stock : "?"),
-      h("td", {}, h("span", { class: "pr-pill " + cls }, txt), f.avant_le && !f.verifie ? h("span", { class: "pr-calc" }, ` · commander avant le ${fmtDate(f.avant_le)}`) : null),
-      h("td", { class: "num" }, f.verifie ? (f.verifie_quantite === null ? "il en reste" : "j'en ai " + f.verifie_quantite) : champ),
-      h("td", {}, f.verifie
-        ? h("button", { class: "btn-petit", title: "Annuler la vérification (le comptage reste)", onclick: () => tenter(async () => {
-            await api(`/preparation/${prep.id}/verif/${f.piece_id}`, { method: "DELETE" }); await rechargerPreparation();
-          }) }, "↺")
-        : h("button", { class: "btn-petit", onclick: valider }, f.suivi === "quantite" ? "OK" : "il en reste")));
+      h("td", {}, h("span", { class: "pr-pill " + cls }, txt), f.avant_le ? h("span", { class: "pr-calc" }, ` · commander avant le ${fmtDate(f.avant_le)}`) : null),
+      h("td", { class: "num" }, saisie));
   };
-  const restants = d.fournitures.filter((f) => !f.verifie).length;
-  const aCommander = d.fournitures.filter((f) => f.verifie && f.a_commander);
-  const recup = d.fournitures.filter((f) => f.verifie && f.recup && f.a_commander);
-  return h("section", { class: "carte pr-temps", id: "pr-verifier" },
+  return fige(h("section", { class: "carte pr-temps", id: "pr-verifier" },
     h("div", { class: "pr-tete" }, h("span", { class: "pr-num" }, "2"), h("h2", {}, "Fournitures à vérifier")),
-    h("p", { class: "pr-regle" }, "Ce qu'il faut pour produire la liste du 1, comparé à ce qui devrait rester d'après l'outil. Les fournitures maison en stock sont utilisées d'abord. Vérifie chaque ligne, même celles qui semblent bonnes : tape ce que tu as vraiment (c'est un comptage), ou « OK » si le chiffre est juste."),
+    h("p", { class: "pr-regle" }, "Ce qu'il faut pour produire la liste du 1 (les fournitures maison en stock sont utilisées d'abord), et ce qu'il y a d'après l'outil. Comptez chaque fourniture, même celles qui semblent bonnes : le chiffre tapé devient le stock. Gomme, peinture : dites seulement s'il en reste."),
     d.fournitures.length ? h("div", { class: "pr-defile" }, h("table", { class: "tbl" },
-      h("thead", {}, h("tr", {}, ["Fourniture", "Il en faut", "Devrait rester", "État", "J'en ai", ""].map((t, i) => h("th", { class: [1, 2, 4].includes(i) ? "num" : null }, t)))),
-      h("tbody", {}, d.fournitures.map(ligne)))) : h("div", { class: "vide" }, "Rien à vérifier : la liste du 1 est vide, ou ce sont des articles sans recette."),
-    restants ? h("div", { class: "pr-pied" }, h("span", { class: "note" }, `${restants} ligne${restants > 1 ? "s" : ""} à vérifier sur ${d.fournitures.length}. La liste à commander apparaît quand tout est vérifié.`))
-      : d.fournitures.length ? blocCommandes(d, aCommander.filter((f) => !f.recup), recup) : null,
-    d.commandes.length ? blocEnAttente(d) : null);
+      h("thead", {}, h("tr", {}, ["Fourniture", "Il en faut", "D'après l'outil", "État", "J'en ai"].map((t, i) => h("th", { class: [1, 2, 4].includes(i) ? "num" : null }, t)))),
+      h("tbody", {}, d.fournitures.map(ligne)))) : h("div", { class: "vide" }, "Rien à vérifier : la liste du 1 est vide, ou ce sont des articles achetés puis revendus.")));
 }
 
-function blocCommandes(d, lignes, recup) {
-  return h("div", { class: "pr-commande" },
-    h("strong", {}, lignes.length ? "Tout est vérifié. À commander :" : "Tout est vérifié. Rien à commander."),
-    recup.map((f) => h("div", {}, `Gardez de quoi faire : ${f.nom}, il en faut ${f.il_en_faut}, vous en avez ${f.verifie_quantite} (récup).`)),
-    lignes.length ? h("table", { class: "tbl" }, h("tbody", {}, lignes.map((f) => {
-      const q = h("input", { class: "pr-q", type: "text", inputmode: "numeric", value: String(f.a_commander), "aria-label": "Quantité commandée : " + f.nom });
-      return h("tr", {},
-        h("td", { style: "font-weight:600" }, f.nom),
-        h("td", { class: "pr-calc" }, f.mode_achat === "tout_le_disponible" ? "prendre tout le disponible" :
-          f.revente ? `à racheter ${f.il_en_faut}${f.en_route ? ` − ${f.en_route} en route` : ""}` :
-          `il en faut ${f.il_en_faut} − ${f.verifie_quantite} en stock${f.en_route ? ` − ${f.en_route} en route` : ""}${f.lot ? ` → ${f.lot.nombre} lot${f.lot.nombre > 1 ? "s" : ""} de ${f.lot.taille}` : ""}`),
-        h("td", { class: "pr-calc" }, f.avant_le ? "avant le " + fmtDate(f.avant_le) : ""),
-        h("td", { class: "num" }, q),
-        h("td", {}, h("button", { class: "btn-petit", onclick: () => tenter(async () => {
-          if (!/^\d+$/.test(q.value.trim()) || Number(q.value) < 1) throw new Error("Indiquez la quantité commandée.");
-          await api("/commandes", { method: "POST", body: { piece_id: f.piece_id, quantite: Number(q.value), taille_lot: f.lot ? f.lot.taille : null } });
-          flash("Noté comme commandé."); await rechargerPreparation();
-        }) }, "Commandé")));
-    }))) : null);
+function sectionCommander(d) {
+  const restants = d.fournitures.filter((f) => !f.verifie).length;
+  const recup = d.commander.filter((f) => f.recup);
+  const lignes = d.commander.filter((f) => !f.recup);
+  const ligne = (f) => {
+    const q = h("input", { class: "pr-q", id: "cmd-" + f.piece_id, type: "text", inputmode: "numeric", value: String(f.a_commander), "aria-label": "Quantité commandée : " + f.nom });
+    const calcul = f.mode_achat === "tout_le_disponible" ? "prendre tout le disponible"
+      : f.revente ? `${f.il_en_faut} à racheter (décidé au 1)${f.en_route ? ` − ${f.en_route} en route` : ""}`
+      : f.suivi !== "quantite" ? "il n'en reste plus assez"
+      : `il en faut ${f.il_en_faut} − ${f.verifie_quantite} en stock${f.en_route ? ` − ${f.en_route} en route` : ""}`;
+    return h("tr", { "data-cle": "c" + f.piece_id },
+      h("td", { style: "font-weight:600" }, f.nom),
+      h("td", { class: "pr-calc" }, calcul, f.lot ? ` → ${f.lot.nombre} lot${f.lot.nombre > 1 ? "s" : ""} de ${f.lot.taille}` : ""),
+      h("td", { class: "pr-calc" }, f.avant_le ? "avant le " + fmtDate(f.avant_le) : ""),
+      h("td", { class: "num" }, q),
+      h("td", {}, h("button", { class: "btn-petit", onclick: () => tenter(async () => {
+        if (!/^\d+$/.test(q.value.trim()) || Number(q.value) < 1) throw new Error("Indiquez la quantité commandée.");
+        await api("/commandes", { method: "POST", body: { piece_id: f.piece_id, quantite: Number(q.value), taille_lot: f.lot ? f.lot.taille : null } });
+        flash("Noté comme commandé."); await rafraichirPreparation();
+      }) }, "Commandé")));
+  };
+  return fige(h("section", { class: "carte pr-temps", id: "pr-commander" },
+    h("div", { class: "pr-tete" }, h("span", { class: "pr-num" }, "3"), h("h2", {}, "Commander")),
+    h("p", { class: "pr-regle" }, "Ce qui manque d'après vos vérifications du 2 (arrondi aux lots), et les articles achetés puis revendus décidés au 1. « Commandé » met la ligne en attente ; « Reçu » l'entre en stock."),
+    restants ? h("div", { class: "note", style: "margin:0 14px", "data-cle": "restants" }, restants > 1 ? `${restants} fournitures pas encore vérifiées au 2 : elles s'ajouteront ici si elles manquent.` : "1 fourniture pas encore vérifiée au 2 : elle s'ajoutera ici si elle manque.") : null,
+    recup.map((f) => h("div", { class: "note", style: "margin:0 14px", "data-cle": "r" + f.piece_id }, `Gardez de quoi faire : ${f.nom}, il en faut ${f.il_en_faut}, vous en avez ${f.verifie_quantite} (récup).`)),
+    lignes.length ? h("div", { class: "pr-defile" }, h("table", { class: "tbl" }, h("tbody", {}, lignes.map(ligne))))
+      : h("div", { class: "vide" }, restants ? "Rien à commander pour l'instant." : "Rien à commander."),
+    d.commandes.length ? blocEnAttente(d) : null));
 }
 
 function blocEnAttente(d) {
   return h("div", { class: "pr-commande pr-attente" }, h("strong", {}, "Commandé, en attente"),
     h("table", { class: "tbl" }, h("tbody", {}, d.commandes.map((cmd) => {
-      const q = h("input", { class: "pr-q", type: "text", inputmode: "numeric", value: String(cmd.quantite), "aria-label": "Quantité reçue : " + cmd.nom });
-      return h("tr", {},
+      const q = h("input", { class: "pr-q", id: "recu-" + cmd.id, type: "text", inputmode: "numeric", value: String(cmd.quantite), "aria-label": "Quantité reçue : " + cmd.nom });
+      return h("tr", { "data-cle": "e" + cmd.id },
         h("td", { style: "font-weight:600" }, cmd.nom),
-        h("td", { class: "pr-calc" }, `${cmd.suivi === "quantite" ? cmd.quantite : "1 pot"} commandé${cmd.quantite > 1 ? "s" : ""} le ${fmtDate(cmd.commande_le.slice(0, 10))}`),
+        h("td", { class: "pr-calc" }, `${cmd.suivi === "quantite" ? cmd.quantite : "1"} commandé${cmd.quantite > 1 ? "s" : ""} le ${fmtDate(cmd.commande_le.slice(0, 10))}`),
         h("td", { class: "num" }, cmd.suivi === "quantite" ? q : null),
         h("td", {}, h("div", { class: "actions-ligne" },
           h("button", { class: "btn-petit", onclick: () => tenter(async () => {
             await api(`/commandes/${cmd.id}/recu`, { method: "POST", body: cmd.suivi === "quantite" ? { quantite: Number(q.value) } : {} });
-            flash("Reçu : entré en stock."); await rechargerPreparation();
+            flash("Reçu : entré en stock."); await rafraichirPreparation();
           }) }, "Reçu"),
           h("button", { class: "btn-petit", onclick: () => tenter(async () => {
             if (!confirm(`Annuler la commande de ${cmd.nom} ?`)) return;
-            await api("/commandes/" + cmd.id, { method: "DELETE" }); await rechargerPreparation();
+            await api("/commandes/" + cmd.id, { method: "DELETE" }); await rafraichirPreparation();
           }) }, "Annuler"))));
     }))));
 }
@@ -1073,27 +1163,25 @@ function sectionChecklist(d) {
     return `il en faut ${x.besoin}, il en reste ${x.stock} → au moins ${x.manque}` + (x.pour > 1 ? ` · ${x.fois} × ${x.matiere ?? "matière"} → ${x.produit}${reserve > 0 ? ` (${reserve} en réserve)` : ""}` : "");
   };
   const ligne = (x) => {
-    const id = "fait-" + x.piece_id;
     const fait = x.fait !== null;
-    const q = fait ? null : h("input", { class: "pr-q", id, type: "text", inputmode: "numeric", placeholder: String(x.prevu || 0), "aria-label": (x.type === "utilise" ? "Utilisées : " : "Produit : ") + x.nom,
-      onkeydown: (e) => { if (e.key === "Enter") valider(); } });
+    const q = fait ? null : h("input", { class: "pr-q", id: "fait-" + x.piece_id, type: "text", inputmode: "numeric", placeholder: String(x.prevu || 0), "aria-label": (x.type === "utilise" ? "Utilisées : " : "Produit : ") + x.nom,
+      onkeydown: (e) => { if (e.key === "Enter") { e.preventDefault(); valider(); } } });
     const matiere = !fait && x.type === "maison" && x.fois === null && x.manque > 0
-      ? h("input", { class: "pr-q", type: "text", inputmode: "numeric", placeholder: x.matiere ? x.matiere.split(" ")[0].toLowerCase() + "s ?" : "feuilles ?", "aria-label": "Matière utilisée pour " + x.nom }) : null;
+      ? h("input", { class: "pr-q", id: "matiere-" + x.piece_id, type: "text", inputmode: "numeric", placeholder: x.matiere ? x.matiere.split(" ")[0].toLowerCase() + "s ?" : "feuilles ?", "aria-label": "Matière utilisée pour " + x.nom }) : null;
     const valider = () => tenter(async () => {
       const v = q.value.trim() === "" ? String(x.prevu || 0) : q.value.trim();
       if (!/^\d+$/.test(v)) throw new Error("Un nombre entier.");
       await api(`/preparation/${prep.id}/fait`, { method: "PUT", body: { piece_id: x.piece_id, quantite: Number(v), sens: x.type === "utilise" ? "utilise" : "produit", matiere: matiere && matiere.value !== "" ? Number(matiere.value) : null } });
-      const suivant = [...document.querySelectorAll("#pr-checklist .pr-q")].map((y) => y.id).filter(Boolean); const i = suivant.indexOf(id);
-      await rechargerPreparation(suivant[i + 1]);
+      await rafraichirPreparation();
     });
-    return h("tr", { class: fait ? "pr-faite" : null },
+    return h("tr", { "data-cle": "k" + x.type + x.piece_id, class: fait ? "pr-faite" : null },
       h("td", { style: "font-weight:600" }, x.type === "utilise" ? x.nom + " utilisées" : x.nom),
       h("td", { class: "num" }, x.prevu || "—"),
       h("td", { class: "pr-calc cache-tel" }, detail(x)),
       h("td", { class: "num" }, fait ? String(x.fait) : h("div", { class: "pr-cellule" }, q, matiere)),
       h("td", {}, fait
         ? h("button", { class: "btn-petit", title: "Annuler (le stock revient comme avant)", onclick: () => tenter(async () => {
-            await api(`/preparation/${prep.id}/fait/${x.piece_id}`, { method: "DELETE" }); await rechargerPreparation();
+            await api(`/preparation/${prep.id}/fait/${x.piece_id}`, { method: "DELETE" }); await rafraichirPreparation();
           }) }, "↺")
         : h("button", { class: "btn-petit", onclick: valider }, "c'est fait")));
   };
@@ -1105,22 +1193,21 @@ function sectionChecklist(d) {
     if (x.famille !== fam) { fam = x.famille; groupes.push(h("tr", { class: "pr-famille" }, h("td", { colspan: "5" }, fam))); }
     groupes.push(ligne(x));
   }
-  return h("section", { class: "carte pr-temps", id: "pr-checklist" },
-    h("div", { class: "pr-tete" }, h("span", { class: "pr-num" }, "3"), h("h2", {}, "Ce qu'on a produit")),
-    h("p", { class: "pr-regle" }, "Au fil de la préparation. « C'est fait » ajoute au stock ce qui a été produit et retire les fournitures utilisées (calcul théorique, recalé au comptage). On commence par les fournitures maison : le surplus reste en réserve."),
+  return fige(h("section", { class: "carte pr-temps", id: "pr-checklist" },
+    h("div", { class: "pr-tete" }, h("span", { class: "pr-num" }, "4"), h("h2", {}, "Ce qu'on a produit")),
+    h("p", { class: "pr-regle" }, "Au fil de la préparation. « C'est fait » ajoute au stock ce qui a été produit et retire les fournitures utilisées (calcul théorique, recalé au comptage avant le salon). On commence par les fournitures maison : le surplus reste en réserve."),
     d.checklist.length ? h("div", { class: "pr-defile" }, h("table", { class: "tbl" },
       h("thead", {}, h("tr", {}, ["À produire", "Prévu", "Détail", "Produit", ""].map((t, i) => h("th", { class: i === 1 || i === 3 ? "num" : i === 2 ? "cache-tel" : null }, t)))),
-      h("tbody", {}, groupes))) : h("div", { class: "vide" }, "Rien à produire."));
+      h("tbody", {}, groupes))) : h("div", { class: "vide" }, "Rien à produire.")));
 }
 
 // ───────────── Recettes ─────────────
 // « Ce qu'il faut pour en faire » (spec §1) : pour un article ou une fourniture maison, un produit (toutes ses variantes),
 // ou toute une famille pour une variante (« tous les prints A5 »). Enregistré à chaque changement.
-async function pageRecettes() {
+async function pageRecettes(cle) {
   [etat.stock, etat.recettes] = await Promise.all([api("/stock"), api("/recettes")]);
   dessinerRecettes();
-  // #recettes/p<produit> (lien « Recette » du Stock) : on va à sa carte, ou à celle de sa famille.
-  const cle = etat.params[0];
+  // #reglages/recettes/p<produit> (lien « Recette » du Stock) : on va à sa carte, ou à celle de sa famille.
   if (cle) {
     const pr = cle.startsWith("p") ? toutesPieces().find((p) => p.produit_id === Number(cle.slice(1))) : null;
     const el = document.querySelector(`[data-cle="${cle}"]`) ?? (pr ? document.querySelector(`[data-cle="f${pr.famille_id}:${pr.variante}"]`) : null);
@@ -1171,10 +1258,14 @@ function texteQuantite(q) {
   return String(q).replace(".", ",");
 }
 
+// Enregistre, puis redessine seulement la carte de cette recette.
 async function sauverRecette(c, pour, elements) {
   await api("/recettes", { method: "PUT", body: { ...c.corps, pour, elements } });
   etat.recettes = await api("/recettes");
-  dessinerRecettes();
+  const neuve = ciblesRecettes().find((x) => x.cle === c.cle);
+  const ancienne = document.querySelector(`[data-cle="${CSS.escape(c.cle)}"]`);
+  if (neuve && ancienne) ancienne.replaceWith(carteRecette(neuve, choixElements(neuve)));
+  else dessinerRecettes();
 }
 
 function carteRecette(c, options) {
@@ -1220,10 +1311,10 @@ function carteRecette(c, options) {
 }
 
 function dessinerRecettes() {
-  entete("Recettes");
+  entete("Réglages");
   const page = document.getElementById("page");
   const cibles = ciblesRecettes();
-  const blocs = [h("p", { class: "note", style: "margin:0" },
+  const blocs = [ongletsReglages("recettes"), h("p", { class: "note", style: "margin:0" },
     "Ce qu'il faut pour en faire un (ou, pour une fourniture maison, pour en faire une plaque ou une feuille : 25 planchettes = 1 plaque MDF). ",
     "« Même variante » : la planchette du même modèle, le carton du même format. Une quantité décimale (¼ = 1/4) est partagée : les prints A5 se mélangent sur une feuille A3. ",
     "La peinture et la gomme n'ont pas de quantité : elles apparaissent seulement « à vérifier ». Un article à vendre sans recette est considéré comme acheté puis revendu.")];
