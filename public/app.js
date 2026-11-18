@@ -8,9 +8,8 @@ const SUIVIS = {
 const PAGES = [
   { id: "accueil", label: "Accueil" },
   { id: "stock", label: "Stock" },
-  { id: "atelier", label: "Atelier" },
+  { id: "preparation", label: "Préparation" },
   { id: "recettes", label: "Recettes" },
-  { id: "achats", label: "À acheter" },
   { id: "salons", label: "Salons" },
   { id: "questions", label: "Questions" },
   { id: "reglages", label: "Réglages" },
@@ -65,11 +64,11 @@ const etat = {
   params: [], salons: null, salonEdition: null, objectifs: null, plan: null, comptageAvant: null,
 };
 
-// Adresses : #stock, #stock/avant/<salon>, #atelier, #salons, #objectifs/<préparation>, #reglages
+// Adresses : #stock, #stock/avant/<salon>, #preparation, #recettes, #salons, #bilan/<salon>, #reglages
 function pageCourante() {
   const [id, ...params] = location.hash.replace("#", "").split("/");
   etat.params = params;
-  if (id === "objectifs" && params[0]) return "objectifs";
+  if (["atelier", "achats", "objectifs"].includes(id)) return "preparation"; // anciennes adresses
   if (id === "bilan" && params[0]) return "bilan";
   return PAGES.some((p) => p.id === id && !p.bientot) ? id : "accueil";
 }
@@ -79,7 +78,7 @@ function dessinerMenu() {
   nav.replaceChildren(
     ...PAGES.map((p) =>
       h("button", {
-        "aria-current": etat.page === p.id || ((etat.page === "objectifs" || etat.page === "bilan") && p.id === "salons") ? "page" : null,
+        "aria-current": etat.page === p.id || (etat.page === "bilan" && p.id === "salons") ? "page" : null,
         disabled: p.bientot,
         title: p.bientot ? "Pas encore construit" : null,
         onclick: () => { location.hash = p.id; },
@@ -98,12 +97,10 @@ async function afficher() {
     if (etat.page === "accueil") await pageAccueil();
     if (etat.page === "stock") await pageStock();
     if (etat.page === "reglages") await pageReglages();
-    if (etat.page === "atelier") await pageAtelier();
+    if (etat.page === "preparation") await pagePreparation();
     if (etat.page === "recettes") await pageRecettes();
     if (etat.page === "salons") await pageSalons();
     if (etat.page === "questions") await pageQuestions();
-    if (etat.page === "achats") await pageAchats();
-    if (etat.page === "objectifs") await pageObjectifs(Number(etat.params[0]));
     if (etat.page === "bilan") await pageBilan(Number(etat.params[0]));
   });
 }
@@ -855,7 +852,7 @@ function lignePieceReglage(p) {
     h("td", { class: "note" }, SUIVIS[p.suivi]),
     h("td", {}, h("div", { class: "actions-ligne" },
       h("button", { class: "btn-petit", onclick: () => { etat.edition = p.id; dessinerReglages(); } }, "Modifier"),
-      p.niveau === "achete" ? h("button", { class: "btn-petit", disabled: !!etat.achatEdition, onclick: () => tenter(() => ouvrirReglageAchat(p)) }, "Achat") : null,
+      p.niveau === "achete" || p.niveau === "recup" ? h("button", { class: "btn-petit", disabled: !!etat.achatEdition, onclick: () => tenter(() => ouvrirReglageAchat(p)) }, "Achat") : null,
       h("button", { class: "btn-petit", onclick: () => tenter(async () => {
         await api("/pieces/" + p.id, { method: "PATCH", body: { fin_de_serie: !p.fin_de_serie } });
         await pageReglages();
@@ -864,425 +861,382 @@ function lignePieceReglage(p) {
 }
 
 
-// ───────────── Recettes ─────────────
-// Une recette appartient à un produit (vaut pour toutes ses variantes), à un article simple,
-// ou à toute une famille (sortie au choix par variante, ex. prints). Chaque étape s'écrit comme une phrase.
-async function pageRecettes() {
-  [etat.stock, etat.recettes] = await Promise.all([api("/stock"), api("/recettes")]);
-  if (etat.params[0]) etat.recetteSel = etat.params[0];
-  etat.travail = null;
-  dessinerRecettes();
+// ───────────── Préparation ─────────────
+// Décision du 18/11/2026 (maquette : docs/maquette/preparation.html) :
+// 1. quoi produire (conseil prérempli, on tape le nombre), 2. fournitures à vérifier puis commander,
+// 3. ce qu'on a produit (checklist), 4. comptage avant (page Compter).
+async function pagePreparation() {
+  etat.prep = await api("/preparation");
+  dessinerPreparation();
 }
 
-function proprietaires() {
-  return etat.stock.map((f) => {
-    const items = [];
-    if (f.variantes?.length) items.push({ cle: "f" + f.id, type: "commune", famille: f, nom: `Tous les ${f.nom.toLowerCase()}`, sous: f.variantes.join(" · ") + ", mélangés" });
-    const vus = new Set();
-    // Les fournitures maison se fabriquent dans la recette du produit fini : pas d'entrée à part (sauf recette déjà écrite).
-    const aPart = (x) => x.niveau === "a_vendre" || (x.niveau === "fait_maison" && etat.recettes.some((r) => r.piece_id === x.id || (x.produit_id && r.produit_id === x.produit_id)));
-    for (const p of f.pieces.filter(aPart)) {
-      if (p.produit_id) {
-        if (vus.has(p.produit_id)) continue;
-        vus.add(p.produit_id);
-        const vs = f.pieces.filter((x) => x.produit_id === p.produit_id);
-        items.push({ cle: "p" + p.produit_id, type: "produit", famille: f, produit_id: p.produit_id, nom: p.produit, variantes: vs, niveau: p.niveau, sous: `${vs.length} var.` + (p.niveau === "fait_maison" ? " · maison" : "") });
-      } else items.push({ cle: "a" + p.id, type: "piece", famille: f, piece: p, nom: p.nom, niveau: p.niveau, sous: p.niveau === "fait_maison" ? "maison" : "" });
-    }
-    // Produits fabriqués par la recette commune (sans recette à eux) : regroupés sous « Tous les … ».
-    const commune = items.find((x) => x.type === "commune");
-    const couverts = commune ? items.filter((x) => x.type !== "commune" && !etapesDe(x).length && (x.type === "produit" ? x.variantes : [x.piece]).every((p) => fabriquePar(p)?.commune)) : [];
-    if (commune && couverts.length) commune.sous = `${couverts.length} produits, formats mélangés`;
-    return { famille: f, items: items.filter((x) => !couverts.includes(x)) };
-  }).filter((g) => g.items.length);
+async function rechargerPreparation(focus) {
+  const y = window.scrollY;
+  etat.prep = await api("/preparation");
+  dessinerPreparation();
+  window.scrollTo(0, y);
+  if (focus) document.getElementById(focus)?.focus();
 }
 
-const etapesDe = (o) => etat.recettes
-  .filter((r) => (o.type === "commune" ? r.commune && r.famille_id === o.famille.id : o.type === "produit" ? r.produit_id === o.produit_id : r.piece_id === o.piece.id))
-  .sort((a, b) => a.ordre - b.ordre || a.id - b.id);
+const ETATS_FOURNITURE = {
+  manque: (f) => ["pr-alerte", `manque ${f.il_en_faut - Math.max(0, f.stock)}`],
+  jamais: () => ["pr-inconnu", "jamais compté"],
+  revente: (f) => ["pr-inconnu", `à racheter · ${Math.max(0, f.stock)} en stock`],
+  bas: (f) => ["pr-bas", `zone critique : il en restera ${f.stock - f.il_en_faut} (alerte sous ${f.seuil})`],
+  inconnu_q: () => ["pr-inconnu", "quantité inconnue (rendement à renseigner)"],
+  ok: () => ["pr-ok", "devrait suffire"],
+  sans: () => ["pr-sans", "pas de quantité : vérifie qu'il en reste"],
+};
 
-const nomProduit = (id) => piecesListe().find((p) => p.produit_id === id)?.produit ?? "?";
-const nomLigne = (l) => (l.piece_id ? pieceDe(l.piece_id)?.nom ?? "?" : `${nomProduit(l.produit_id)} · même variante`);
-const memeLigne = (a, b) => (a.piece_id && a.piece_id === b.piece_id) || (a.produit_id && a.produit_id === b.produit_id);
-
-// Un élément est-il fabriqué par une recette ? (renvoie l'étape qui le fait)
-function fabriquePar(p) {
-  return etat.recettes.find((r) =>
-    r.lignes.some((l) => l.sens === "donne" && (l.piece_id === p.id || (p.produit_id && l.produit_id === p.produit_id)))
-    || (r.commune && r.famille_id === p.famille_id && p.niveau === "a_vendre" && !r.lignes.some((l) => l.sens === "donne")
-        && (r.formats.some((f) => f.variante === p.variante) || (!r.formats.length && (etat.stock.find((f) => f.id === p.famille_id)?.variantes ?? []).includes(p.variante)))));
-}
-const estFabrique = (p) => !!fabriquePar(p);
-// Nom de la recette (produit, article ou famille) à laquelle appartient une étape.
-const nomRecette = (r) => (r.commune ? `Tous les ${(etat.stock.find((f) => f.id === r.famille_id)?.nom ?? "").toLowerCase()}` : r.produit_id ? nomProduit(r.produit_id) : pieceDe(r.piece_id)?.nom ?? "?");
-function texteStatut(o, st) {
-  if (st !== "commune") return TEXTE_STATUT[st];
-  const r = fabriquePar(o.type === "produit" ? o.variantes[0] : o.piece);
-  return r ? `fait dans « ${nomRecette(r)} »` : "";
-}
-// Fournitures maison utilisées qui ne sont fabriquées par aucune recette.
-function maisonsManquantes(o) {
-  const vues = new Map();
-  for (const r of etapesDe(o)) for (const l of r.lignes.filter((x) => x.sens === "utilise")) {
-    const cibles = l.piece_id ? [pieceDe(l.piece_id)].filter(Boolean) : piecesListe().filter((p) => p.produit_id === l.produit_id);
-    for (const p of cibles) if (p.niveau === "fait_maison" && !estFabrique(p)) vues.set(p.produit_id ? "p" + p.produit_id : "a" + p.id, p.produit_id ? p.produit : p.nom);
-  }
-  return [...vues].map(([cle, nom]) => ({ cle, nom }));
-}
-function statutRecette(o) {
-  const etapes = etapesDe(o);
-  if (o.type === "commune") return etapes.length ? "ok" : "vide";
-  if (!etapes.length) {
-    const vs = o.type === "produit" ? o.variantes : [o.piece];
-    return vs.every(estFabrique) ? "commune" : "ko";
-  }
-  return maisonsManquantes(o).length ? "incomplete" : "ok";
-}
-const TEXTE_STATUT = { ok: "complète", ko: "à faire", incomplete: "incomplète", commune: "", vide: "" };
-
-// L'établi : à gauche la recette à écrire, à droite les ingrédients (cherchés ou glissés).
-// Chaque étape : « On utilise » → « On obtient ». Une étape est enregistrée dès qu'elle est complète (nom + ce qu'on obtient).
-function dessinerRecettes() {
-  entete("Recettes");
+function dessinerPreparation() {
+  const d = etat.prep;
+  entete("Préparation");
   const page = document.getElementById("page");
-  const groupes = proprietaires();
-  const tous = groupes.flatMap((g) => g.items);
-  if (!tous.length) {
-    page.replaceChildren(h("div", { class: "carte" }, h("div", { class: "vide" }, "Aucun article à fabriquer pour l'instant. Ajoutez-en depuis le ", h("a", { href: "#stock" }, "Stock"), ".")));
+  if (!d.preparation) {
+    page.replaceChildren(h("div", { class: "carte" }, h("div", { class: "vide" },
+      "Aucun salon à venir. Ajoutez le prochain salon dans ", h("a", { href: "#salons" }, "Salons"), " : la préparation commence 15 jours avant.")));
     return;
   }
-  const sel = tous.find((o) => o.cle === etat.recetteSel) ?? tous.find((o) => o.type !== "commune") ?? tous[0];
-  if (etat.recetteSel !== sel.cle || !etat.travail || etat.travail.cle !== sel.cle) {
-    etat.recetteSel = sel.cle;
-    etat.travail = { cle: sel.cle, etapes: etapesDe(sel).map(versTravail) };
+  const prep = d.preparation;
+  const toutDecide = d.articles.every((a) => a.decide);
+  const aVerifier = d.fournitures.filter((f) => !f.verifie).length;
+  const checkFaits = d.checklist.filter((x) => x.fait !== null).length;
+  const tempo = [
+    ["pr-produire", "1. Quoi produire", toutDecide ? "liste arrêtée" : "vous décidez", toutDecide],
+    ["pr-verifier", "2. Fournitures à vérifier", d.fournitures.length ? (aVerifier ? `${aVerifier} à vérifier` : "tout est vérifié") : "rien à vérifier", d.fournitures.length > 0 && !aVerifier],
+    ["pr-checklist", "3. Ce qu'on a produit", d.checklist.length ? `${checkFaits} / ${d.checklist.length}` : "rien à produire", d.checklist.length > 0 && checkFaits === d.checklist.length],
+    ["pr-compter", "4. Compter avant de partir", "avant le " + fmtDate(d.salons[0].date_debut), false],
+  ];
+  page.replaceChildren(h("div", { class: "pr" },
+    h("p", { class: "note", style: "margin:0" }, d.salons.map((s) => `${s.nom} (${datesSalon(s)})`).join(" · "),
+      ` · la préparation commence 15 jours avant, le ${fmtDate(d.debut)}.`),
+    h("nav", { class: "pr-frise", "aria-label": "Les quatre temps de la préparation" },
+      tempo.map(([id, t, s, fait]) => h("a", { href: "#preparation", class: fait ? "fait" : null, onclick: (e) => { e.preventDefault(); document.getElementById(id)?.scrollIntoView({ behavior: "smooth" }); } },
+        h("b", {}, t), h("span", {}, s)))),
+    d.problemes.length ? h("div", { class: "question" }, h("strong", {}, "À régler dans Recettes"), d.problemes.map((p) => h("div", {}, p))) : null,
+    sectionProduire(d), sectionVerifier(d), sectionChecklist(d),
+    h("section", { class: "carte pr-temps", id: "pr-compter" },
+      h("div", { class: "pr-tete" }, h("span", { class: "pr-num" }, "4"), h("h2", {}, "Compter avant de partir")),
+      h("p", { class: "pr-regle" }, "Le comptage d'avant salon recale le stock des articles. Pas de comptage au retour."),
+      h("div", {}, h("a", { class: "btn", href: "#stock/avant/" + prep.id, style: "display:inline-flex;align-items:center;text-decoration:none" }, "Faire le comptage avant"))),
+  ));
+}
+
+function sectionProduire(d) {
+  const prep = d.preparation;
+  const familles = [];
+  for (const a of d.articles) {
+    let f = familles.find((x) => x.id === a.famille_id);
+    if (!f) familles.push(f = { id: a.famille_id, nom: a.famille, lignes: [] });
+    f.lignes.push(a);
   }
-  const liste = h("nav", { class: "carte rc-liste", "aria-label": "Recettes" }, groupes.map((g) => [
-    h("div", { class: "fam" }, g.famille.nom),
-    g.items.map((o) => {
-      const st = statutRecette(o);
-      return h("button", { type: "button", class: "prod" + (o === sel ? " on" : ""), "aria-current": o === sel ? "true" : null,
-        onclick: () => { etat.recetteSel = o.cle; etat.travail = null; etat.palQ = ""; dessinerRecettes(); } },
-        h("span", {}, o.nom, o.sous ? h("small", { class: "sous" }, " " + o.sous) : null),
-        texteStatut(o, st) ? h("small", { class: "etat " + st }, texteStatut(o, st)) : null);
-    })]));
-  page.replaceChildren(h("div", { class: "rc3" }, liste, etabli(sel), palette(sel)));
-  const f = etat.recetteFocus; etat.recetteFocus = null;
-  if (f) queueMicrotask(() => { const el = document.getElementById(f); el?.focus(); el?.select?.(); });
+  const vendus = (x) => x ? String(x.q) : "—";
+  const ligne = (a) => {
+    const id = "prod-" + a.piece_id;
+    const champ = h("input", { class: "pr-q", id, type: "text", inputmode: "numeric", value: String(a.a_produire), "aria-label": (a.achete ? "À racheter : " : "À produire : ") + a.nom,
+      onkeydown: (e) => { if (e.key === "Enter") e.target.blur(); },
+      onchange: (e) => tenter(async () => {
+        const v = e.target.value.trim();
+        if (v !== "" && !/^\d+$/.test(v)) throw new Error("Un nombre entier, ou vide pour revenir au conseil.");
+        await api(`/preparation/${prep.id}/production`, { method: "PUT", body: { piece_id: a.piece_id, a_produire: v === "" ? null : Number(v) } });
+        const suivant = [...document.querySelectorAll(".pr-q")].map((x) => x.id); const i = suivant.indexOf(id);
+        await rechargerPreparation(suivant[i + 1]);
+      }) });
+    return h("tr", {},
+      h("td", {}, h("span", { style: "font-weight:600" }, a.nom), " ",
+        a.stock <= 0 ? h("span", { class: "pr-pill pr-alerte" }, "épuisé") : a.conseil > 0 ? h("span", { class: "pr-pill pr-bas" }, "à refaire") : null),
+      h("td", { class: "num" }, a.stock),
+      h("td", { class: "num cache-tel" }, a.modele_non_precise ? "—" : vendus(a.dernier)),
+      h("td", { class: "num cache-tel" }, a.meilleur && !a.modele_non_precise ? h("span", { title: a.meilleur.salon }, `${a.meilleur.q} · ${a.meilleur.salon}`) : "—"),
+      h("td", { class: "pr-calc" }, a.conseil ? `${a.conseil} · ` : "", a.calcul),
+      h("td", { class: "num" }, h("div", { class: "pr-cellule" }, champ, h("span", { class: "pr-calc" }, a.achete ? "à racheter" : a.decide ? "" : "conseil"))));
+  };
+  const corps = familles.flatMap((f) => {
+    const vues = f.lignes.filter((a) => a.a_produire > 0 || a.conseil > 0 || a.stock <= 0);
+    const autres = f.lignes.filter((a) => !vues.includes(a));
+    return [
+      h("tr", { class: "pr-famille" }, h("td", { colspan: "6" }, f.nom, f.lignes[0].modele_non_precise ? h("span", { class: "pr-calc" }, " · la caisse ne dit pas le modèle : on compare les stocks entre eux") : null)),
+      ...vues.map(ligne),
+      autres.length ? h("tr", {}, h("td", { colspan: "6" }, h("details", {},
+        h("summary", {}, `${autres.length} autre${autres.length > 1 ? "s" : ""} : rien de conseillé`),
+        h("table", { class: "tbl" }, h("tbody", {}, autres.map(ligne)))))) : null,
+    ];
+  });
+  const dernier = d.articles.find((a) => a.dernier)?.dernier?.salon;
+  const total = (filtre) => d.articles.filter(filtre).reduce((t, a) => t + a.a_produire, 0);
+  return h("section", { class: "carte pr-temps", id: "pr-produire" },
+    h("div", { class: "pr-tete" }, h("span", { class: "pr-num" }, "1"), h("h2", {}, "Quoi produire")),
+    h("p", { class: "pr-regle" }, h("strong", {}, "Conseil"), " : ce que l'article a vendu à son meilleur salon, plus la marge, moins le stock. Familles dont la caisse ne dit pas le modèle (tampons) : on remonte au niveau des autres modèles ceux qui en ont la moitié ou moins. La case est préremplie avec le conseil : c'est vous qui décidez (vide = revenir au conseil)."),
+    h("div", { class: "pr-defile" }, h("table", { class: "tbl" },
+      h("thead", {}, h("tr", {}, ["Article", "Stock", dernier ? "Vendus · " + dernier : "Dernier salon", "Meilleur salon", "Conseil", "À produire"].map((t, i) => h("th", { class: [1, 2, 3, 5].includes(i) ? "num" + (i === 2 || i === 3 ? " cache-tel" : "") : null }, t)))),
+      h("tbody", {}, corps))),
+    h("div", { class: "pr-pied" },
+      h("span", { class: "note" }, `À produire : ${total((a) => !a.achete)} · à racheter : ${total((a) => a.achete)}`),
+      h("button", { class: d.articles.every((a) => a.decide) ? "btn-sec" : "btn", onclick: () => tenter(async () => {
+        await api(`/preparation/${prep.id}/production/lot`, { method: "PUT", body: { lignes: d.articles.map((a) => ({ piece_id: a.piece_id, a_produire: a.a_produire })) } });
+        flash("Liste arrêtée. Vous pouvez encore changer un nombre.");
+        await rechargerPreparation();
+      }) }, d.articles.every((a) => a.decide) ? "Liste arrêtée ✓" : "La liste est arrêtée")));
 }
 
-function versTravail(r) {
-  const formats = {};
-  for (const f of r.formats) formats[f.variante] = String(f.quantite);
-  return { id: r.id, nom: r.nom, mode: r.mode, temps_min: r.temps_min ?? "", formats, feuille: r.formats.length > 0,
-    utilise: r.lignes.filter((l) => l.sens === "utilise").map((l) => ({ piece_id: l.piece_id, produit_id: l.produit_id, quantite: l.quantite })),
-    donne: r.lignes.filter((l) => l.sens === "donne").map((l) => ({ piece_id: l.piece_id, produit_id: l.produit_id, quantite: l.quantite })) };
-}
-const proprioCourant = () => proprietaires().flatMap((g) => g.items).find((x) => x.cle === etat.recetteSel);
-function aCompleter(o, e) {
-  const manque = [];
-  if (!String(e.nom).trim()) manque.push("un nom");
-  if (o.type === "commune" ? e.feuille && !Object.values(e.formats).some((q) => String(q).trim()) : !e.donne.length) manque.push("ce qu'on obtient");
-  return manque;
+function sectionVerifier(d) {
+  const prep = d.preparation;
+  const ligne = (f) => {
+    const [cls, txt] = ETATS_FOURNITURE[f.etat](f);
+    const id = "verif-" + f.piece_id;
+    const champ = f.suivi === "quantite" && !f.verifie
+      ? h("input", { class: "pr-q", id, type: "text", inputmode: "numeric", placeholder: f.compte ? String(Math.max(0, f.stock)) : "combien ?", "aria-label": "J'en ai : " + f.nom,
+          onkeydown: (e) => { if (e.key === "Enter") valider(); } })
+      : null;
+    const valider = () => tenter(async () => {
+      const v = champ ? champ.value.trim() : "";
+      if (v !== "" && !/^\d+$/.test(v)) throw new Error("Un nombre entier.");
+      await api(`/preparation/${prep.id}/verif`, { method: "PUT", body: { piece_id: f.piece_id, quantite: v === "" ? null : Number(v) } });
+      const suivant = [...document.querySelectorAll("#pr-verifier .pr-q")].map((x) => x.id); const i = suivant.indexOf(id);
+      await rechargerPreparation(suivant[i + 1]);
+    });
+    return h("tr", { class: f.verifie ? "pr-faite" : null },
+      h("td", {}, h("span", { style: "font-weight:600" }, f.nom), h("span", { class: "pr-calc" }, " · " + f.famille + (f.recup ? " · récup" : ""))),
+      h("td", { class: "num" }, f.il_en_faut === null ? (f.suivi === "quantite" ? "?" : "un peu") : f.il_en_faut),
+      h("td", { class: "num" }, f.suivi !== "quantite" ? "—" : f.compte ? f.stock : "?"),
+      h("td", {}, h("span", { class: "pr-pill " + cls }, txt), f.avant_le && !f.verifie ? h("span", { class: "pr-calc" }, ` · commander avant le ${fmtDate(f.avant_le)}`) : null),
+      h("td", { class: "num" }, f.verifie ? (f.verifie_quantite === null ? "il en reste" : "j'en ai " + f.verifie_quantite) : champ),
+      h("td", {}, f.verifie
+        ? h("button", { class: "btn-petit", title: "Annuler la vérification (le comptage reste)", onclick: () => tenter(async () => {
+            await api(`/preparation/${prep.id}/verif/${f.piece_id}`, { method: "DELETE" }); await rechargerPreparation();
+          }) }, "↺")
+        : h("button", { class: "btn-petit", onclick: valider }, f.suivi === "quantite" ? "OK" : "il en reste")));
+  };
+  const restants = d.fournitures.filter((f) => !f.verifie).length;
+  const aCommander = d.fournitures.filter((f) => f.verifie && f.a_commander);
+  const recup = d.fournitures.filter((f) => f.verifie && f.recup && f.a_commander);
+  return h("section", { class: "carte pr-temps", id: "pr-verifier" },
+    h("div", { class: "pr-tete" }, h("span", { class: "pr-num" }, "2"), h("h2", {}, "Fournitures à vérifier")),
+    h("p", { class: "pr-regle" }, "Ce qu'il faut pour produire la liste du 1, comparé à ce qui devrait rester d'après l'outil. Les fournitures maison en stock sont utilisées d'abord. Vérifie chaque ligne, même celles qui semblent bonnes : tape ce que tu as vraiment (c'est un comptage), ou « OK » si le chiffre est juste."),
+    d.fournitures.length ? h("div", { class: "pr-defile" }, h("table", { class: "tbl" },
+      h("thead", {}, h("tr", {}, ["Fourniture", "Il en faut", "Devrait rester", "État", "J'en ai", ""].map((t, i) => h("th", { class: [1, 2, 4].includes(i) ? "num" : null }, t)))),
+      h("tbody", {}, d.fournitures.map(ligne)))) : h("div", { class: "vide" }, "Rien à vérifier : la liste du 1 est vide, ou ce sont des articles sans recette."),
+    restants ? h("div", { class: "pr-pied" }, h("span", { class: "note" }, `${restants} ligne${restants > 1 ? "s" : ""} à vérifier sur ${d.fournitures.length}. La liste à commander apparaît quand tout est vérifié.`))
+      : d.fournitures.length ? blocCommandes(d, aCommander.filter((f) => !f.recup), recup) : null,
+    d.commandes.length ? blocEnAttente(d) : null);
 }
 
-// Enregistre l'étape si elle est complète (sinon elle reste « à compléter » à l'écran).
-async function sauverEtape(o, e) {
-  if (aCompleter(o, e).length) { dessinerRecettes(); return; }
-  const lignes = [...e.utilise.map((l) => ({ ...l, sens: "utilise" })), ...e.donne.map((l) => ({ ...l, sens: "donne" }))]
-    .map((l) => ({ sens: l.sens, piece_id: l.piece_id ?? null, produit_id: l.produit_id ?? null, quantite: Math.max(1, Number(l.quantite) || 1) }));
-  const body = { nom: e.nom, mode: e.mode, temps_min: String(e.temps_min).trim() === "" ? null : Number(String(e.temps_min).replace(",", ".")), lignes,
-    formats: o.type === "commune" && !e.feuille ? [] : Object.entries(e.formats).filter(([, q]) => String(q).trim() !== "").map(([variante, q]) => ({ variante, quantite: Number(q) })),
-    ...(o.type === "commune" ? { commune: true, famille_id: o.famille.id } : o.type === "produit" ? { produit_id: o.produit_id } : { piece_id: o.piece.id }) };
-  await tenter(async () => {
-    if (e.id) await api("/recettes/" + e.id, { method: "PUT", body });
-    else {
-      const liste = etat.travail?.etapes ?? [];
-      const suivante = liste.slice(liste.indexOf(e) + 1).find((x) => x.id);
-      const r = await api("/recettes", { method: "POST", body: { ...body, avant_id: suivante?.id ?? null } });
-      e.id = r.id;
-      flash("Étape enregistrée.");
+function blocCommandes(d, lignes, recup) {
+  return h("div", { class: "pr-commande" },
+    h("strong", {}, lignes.length ? "Tout est vérifié. À commander :" : "Tout est vérifié. Rien à commander."),
+    recup.map((f) => h("div", {}, `Gardez de quoi faire : ${f.nom}, il en faut ${f.il_en_faut}, vous en avez ${f.verifie_quantite} (récup).`)),
+    lignes.length ? h("table", { class: "tbl" }, h("tbody", {}, lignes.map((f) => {
+      const q = h("input", { class: "pr-q", type: "text", inputmode: "numeric", value: String(f.a_commander), "aria-label": "Quantité commandée : " + f.nom });
+      return h("tr", {},
+        h("td", { style: "font-weight:600" }, f.nom),
+        h("td", { class: "pr-calc" }, f.mode_achat === "tout_le_disponible" ? "prendre tout le disponible" :
+          f.revente ? `à racheter ${f.il_en_faut}${f.en_route ? ` − ${f.en_route} en route` : ""}` :
+          `il en faut ${f.il_en_faut} − ${f.verifie_quantite} en stock${f.en_route ? ` − ${f.en_route} en route` : ""}${f.lot ? ` → ${f.lot.nombre} lot${f.lot.nombre > 1 ? "s" : ""} de ${f.lot.taille}` : ""}`),
+        h("td", { class: "pr-calc" }, f.avant_le ? "avant le " + fmtDate(f.avant_le) : ""),
+        h("td", { class: "num" }, q),
+        h("td", {}, h("button", { class: "btn-petit", onclick: () => tenter(async () => {
+          if (!/^\d+$/.test(q.value.trim()) || Number(q.value) < 1) throw new Error("Indiquez la quantité commandée.");
+          await api("/commandes", { method: "POST", body: { piece_id: f.piece_id, quantite: Number(q.value), taille_lot: f.lot ? f.lot.taille : null } });
+          flash("Noté comme commandé."); await rechargerPreparation();
+        }) }, "Commandé")));
+    }))) : null);
+}
+
+function blocEnAttente(d) {
+  return h("div", { class: "pr-commande pr-attente" }, h("strong", {}, "Commandé, en attente"),
+    h("table", { class: "tbl" }, h("tbody", {}, d.commandes.map((cmd) => {
+      const q = h("input", { class: "pr-q", type: "text", inputmode: "numeric", value: String(cmd.quantite), "aria-label": "Quantité reçue : " + cmd.nom });
+      return h("tr", {},
+        h("td", { style: "font-weight:600" }, cmd.nom),
+        h("td", { class: "pr-calc" }, `${cmd.suivi === "quantite" ? cmd.quantite : "1 pot"} commandé${cmd.quantite > 1 ? "s" : ""} le ${fmtDate(cmd.commande_le.slice(0, 10))}`),
+        h("td", { class: "num" }, cmd.suivi === "quantite" ? q : null),
+        h("td", {}, h("div", { class: "actions-ligne" },
+          h("button", { class: "btn-petit", onclick: () => tenter(async () => {
+            await api(`/commandes/${cmd.id}/recu`, { method: "POST", body: cmd.suivi === "quantite" ? { quantite: Number(q.value) } : {} });
+            flash("Reçu : entré en stock."); await rechargerPreparation();
+          }) }, "Reçu"),
+          h("button", { class: "btn-petit", onclick: () => tenter(async () => {
+            if (!confirm(`Annuler la commande de ${cmd.nom} ?`)) return;
+            await api("/commandes/" + cmd.id, { method: "DELETE" }); await rechargerPreparation();
+          }) }, "Annuler"))));
+    }))));
+}
+
+function sectionChecklist(d) {
+  const prep = d.preparation;
+  const detail = (x) => {
+    if (x.type === "utilise") return "feuilles partagées entre plusieurs articles (formats mélangés) : combien en avez-vous utilisé ?";
+    if (x.type !== "maison") return "";
+    if (!x.manque) return `il en faut ${x.besoin}, la réserve suffit (${x.stock})`;
+    if (x.fois === null) return `il en faut ${x.besoin}, il en reste ${x.stock} → au moins ${x.manque} · rendement inconnu : indiquez aussi combien de ${x.matiere ?? "feuilles"} vous avez utilisé`;
+    const reserve = x.produit - x.manque;
+    return `il en faut ${x.besoin}, il en reste ${x.stock} → au moins ${x.manque}` + (x.pour > 1 ? ` · ${x.fois} × ${x.matiere ?? "matière"} → ${x.produit}${reserve > 0 ? ` (${reserve} en réserve)` : ""}` : "");
+  };
+  const ligne = (x) => {
+    const id = "fait-" + x.piece_id;
+    const fait = x.fait !== null;
+    const q = fait ? null : h("input", { class: "pr-q", id, type: "text", inputmode: "numeric", placeholder: String(x.prevu || 0), "aria-label": (x.type === "utilise" ? "Utilisées : " : "Produit : ") + x.nom,
+      onkeydown: (e) => { if (e.key === "Enter") valider(); } });
+    const matiere = !fait && x.type === "maison" && x.fois === null && x.manque > 0
+      ? h("input", { class: "pr-q", type: "text", inputmode: "numeric", placeholder: x.matiere ? x.matiere.split(" ")[0].toLowerCase() + "s ?" : "feuilles ?", "aria-label": "Matière utilisée pour " + x.nom }) : null;
+    const valider = () => tenter(async () => {
+      const v = q.value.trim() === "" ? String(x.prevu || 0) : q.value.trim();
+      if (!/^\d+$/.test(v)) throw new Error("Un nombre entier.");
+      await api(`/preparation/${prep.id}/fait`, { method: "PUT", body: { piece_id: x.piece_id, quantite: Number(v), sens: x.type === "utilise" ? "utilise" : "produit", matiere: matiere && matiere.value !== "" ? Number(matiere.value) : null } });
+      const suivant = [...document.querySelectorAll("#pr-checklist .pr-q")].map((y) => y.id).filter(Boolean); const i = suivant.indexOf(id);
+      await rechargerPreparation(suivant[i + 1]);
+    });
+    return h("tr", { class: fait ? "pr-faite" : null },
+      h("td", { style: "font-weight:600" }, x.type === "utilise" ? x.nom + " utilisées" : x.nom),
+      h("td", { class: "num" }, x.prevu || "—"),
+      h("td", { class: "pr-calc cache-tel" }, detail(x)),
+      h("td", { class: "num" }, fait ? String(x.fait) : h("div", { class: "pr-cellule" }, q, matiere)),
+      h("td", {}, fait
+        ? h("button", { class: "btn-petit", title: "Annuler (le stock revient comme avant)", onclick: () => tenter(async () => {
+            await api(`/preparation/${prep.id}/fait/${x.piece_id}`, { method: "DELETE" }); await rechargerPreparation();
+          }) }, "↺")
+        : h("button", { class: "btn-petit", onclick: valider }, "c'est fait")));
+  };
+  const groupes = [];
+  const maison = d.checklist.filter((x) => x.type !== "article");
+  if (maison.length) groupes.push(h("tr", { class: "pr-famille" }, h("td", { colspan: "5" }, "Fournitures maison")), ...maison.map(ligne));
+  let fam = null;
+  for (const x of d.checklist.filter((y) => y.type === "article")) {
+    if (x.famille !== fam) { fam = x.famille; groupes.push(h("tr", { class: "pr-famille" }, h("td", { colspan: "5" }, fam))); }
+    groupes.push(ligne(x));
+  }
+  return h("section", { class: "carte pr-temps", id: "pr-checklist" },
+    h("div", { class: "pr-tete" }, h("span", { class: "pr-num" }, "3"), h("h2", {}, "Ce qu'on a produit")),
+    h("p", { class: "pr-regle" }, "Au fil de la préparation. « C'est fait » ajoute au stock ce qui a été produit et retire les fournitures utilisées (calcul théorique, recalé au comptage). On commence par les fournitures maison : le surplus reste en réserve."),
+    d.checklist.length ? h("div", { class: "pr-defile" }, h("table", { class: "tbl" },
+      h("thead", {}, h("tr", {}, ["À produire", "Prévu", "Détail", "Produit", ""].map((t, i) => h("th", { class: i === 1 || i === 3 ? "num" : i === 2 ? "cache-tel" : null }, t)))),
+      h("tbody", {}, groupes))) : h("div", { class: "vide" }, "Rien à produire."));
+}
+
+// ───────────── Recettes ─────────────
+// « Ce qu'il faut pour en faire » (spec §1) : pour un article ou une fourniture maison, un produit (toutes ses variantes),
+// ou toute une famille pour une variante (« tous les prints A5 »). Enregistré à chaque changement.
+async function pageRecettes() {
+  [etat.stock, etat.recettes] = await Promise.all([api("/stock"), api("/recettes")]);
+  dessinerRecettes();
+  // #recettes/p<produit> (lien « Recette » du Stock) : on va à sa carte, ou à celle de sa famille.
+  const cle = etat.params[0];
+  if (cle) {
+    const pr = cle.startsWith("p") ? toutesPieces().find((p) => p.produit_id === Number(cle.slice(1))) : null;
+    const el = document.querySelector(`[data-cle="${cle}"]`) ?? (pr ? document.querySelector(`[data-cle="f${pr.famille_id}:${pr.variante}"]`) : null);
+    el?.scrollIntoView({ block: "center" }); el?.classList.add("rc-vise");
+  }
+}
+
+function ciblesRecettes() {
+  const cibles = [];
+  for (const f of etat.stock) {
+    for (const niveau of ["a_vendre", "fait_maison"]) {
+      const pieces = f.pieces.filter((p) => p.niveau === niveau);
+      if (!pieces.length) continue;
+      const produits = [...new Set(pieces.filter((p) => p.produit_id).map((p) => p.produit_id))];
+      // Plusieurs produits qui partagent les variantes de la famille (prints) : une recette par variante pour toute la famille.
+      const parVariante = niveau === "a_vendre" && f.variantes.length && produits.length >= 2;
+      if (parVariante) for (const v of f.variantes) cibles.push({ cle: `f${f.id}:${v}`, famille: f.nom, niveau, nom: `Tous les ${f.nom.toLowerCase()} ${v}`, corps: { famille_id: f.id, variante: v }, variantes: [v], exemples: pieces.filter((p) => p.variante === v) });
+      for (const pr of produits) {
+        if (parVariante) continue;
+        const vs = pieces.filter((p) => p.produit_id === pr);
+        cibles.push({ cle: "p" + pr, famille: f.nom, niveau, nom: vs[0].produit, corps: { produit_id: pr }, variantes: vs.map((p) => p.variante), exemples: vs });
+      }
+      for (const p of pieces.filter((x) => !x.produit_id)) cibles.push({ cle: "a" + p.id, famille: f.nom, niveau, nom: p.nom, corps: { piece_id: p.id }, variantes: [], exemples: [p] });
     }
-    etat.recettes = await api("/recettes");
-  });
-  dessinerRecettes();
-}
-
-function etabli(o) {
-  const etapes = etat.travail.etapes;
-  const st = statutRecette(o);
-  const n = (l) => l.map((x) => `${x.quantite} ${nomLigne(x).replace(" · même variante", o.type === "commune" ? " · même format" : o.famille.modele_non_precise ? " · même motif" : " · même variante")}`).join(" + ") || "…";
-  const sortieTexte = (e) => (o.type === "commune" ? (e.feuille ? texteFormats(e.formats) + (e.donne.length ? " de " + n(e.donne) : "") : (e.donne.length ? n(e.donne) : "1 print · même format")) : n(e.donne));
-  const vaut = o.type === "produit" ? `vaut pour ${o.variantes.length > 1 ? `les ${o.variantes.length} variantes` : "sa variante"}`
-    : o.type === "commune" ? `vaut pour tous les ${o.famille.nom.toLowerCase()}, formats mélangés` : o.niveau === "fait_maison" ? "fourniture maison" : "";
-  const fabriqueAilleurs = st === "commune" ? fabriquePar(o.type === "produit" ? o.variantes[0] : o.piece) : null;
-  const tete = h("div", { class: "et-tete" },
-    h("span", { class: "sur" }, "Recette"),
-    h("h2", {}, o.nom, vaut ? h("span", { class: "etat ok" }, vaut) : null, texteStatut(o, st) && st !== "ok" ? h("span", { class: "etat " + st }, texteStatut(o, st)) : null),
-    o.type === "produit" ? h("div", { class: "note" }, o.variantes.slice(0, 10).map((v) => v.variante).join(", ") + (o.variantes.length > 10 ? "…" : "")) : null,
-    fabriqueAilleurs ? h("div", { class: "note" }, `Déjà fabriqué à l'étape « ${fabriqueAilleurs.nom} » de la recette ${nomRecette(fabriqueAilleurs)}.`) : null,
-    etapes.length ? [h("div", { class: "note" }, "En résumé :"), h("ol", {}, etapes.map((e) => h("li", {}, h("b", {}, e.nom || "(sans nom)"), " : " + n(e.utilise) + " → " + sortieTexte(e))))] : null);
-
-  const lignes = etapes.map((e, i) => {
-    const manque = aCompleter(o, e);
-    const temps = h("input", { class: String(e.temps_min).trim() ? "" : "vide", value: String(e.temps_min), placeholder: "?", inputmode: "decimal", "aria-label": `Durée de l'étape ${i + 1} en minutes`,
-      onchange: (ev) => { e.temps_min = ev.target.value; sauverEtape(o, e); } });
-    return h("div", { class: "et-etape" + (manque.length ? " incomplete" : "") },
-      h("span", { class: "rond" }, i + 1),
-      h("div", { class: "nomligne" },
-        h("input", { id: `et-nom-${i}`, class: "nom", value: e.nom, placeholder: "Nommer l'étape…", "aria-label": `Nom de l'étape ${i + 1}`,
-          onchange: (ev) => { e.nom = ev.target.value; sauverEtape(o, e); }, onkeydown: (ev) => { if (ev.key === "Enter") ev.target.blur(); } }),
-        h("span", { class: "meta" }, "⏱", temps, "min ·",
-          h("button", { type: "button", title: "Peut-on en faire juste quelques-uns ?", onclick: () => { e.mode = e.mode === "par_matiere" ? "a_la_piece" : "par_matiere"; sauverEtape(o, e); } },
-            e.mode === "par_matiere" ? "tout d'un coup" : "un par un")),
-        h("span", { class: "outils-etape" },
-          h("button", { type: "button", class: "btn-petit", disabled: i === 0 || !e.id || !etapes[i - 1]?.id, "aria-label": "Monter l'étape", onclick: () => deplacerEtape(e, "haut") }, "↑"),
-          h("button", { type: "button", class: "btn-petit", disabled: i === etapes.length - 1 || !e.id || !etapes[i + 1]?.id, "aria-label": "Descendre l'étape", onclick: () => deplacerEtape(e, "bas") }, "↓"),
-          h("button", { type: "button", class: "btn-petit danger", "aria-label": "Supprimer l'étape", onclick: () => tenter(async () => {
-            if (e.id) { if (!confirm(`Supprimer l'étape « ${e.nom} » ?`)) return; await api("/recettes/" + e.id, { method: "DELETE" }); etat.recettes = await api("/recettes"); }
-            etapes.splice(i, 1); dessinerRecettes();
-          }) }, "×"))),
-      h("div", { class: "flux" }, depot(o, e, i, "utilise"), h("span", { class: "fl", "aria-hidden": "true" }, "→"),
-        o.type === "commune" && e.feuille ? depotFormats(o, e, i) : depot(o, e, i, "donne")),
-      manque.length ? h("div", { class: "a-completer" }, "À compléter : " + manque.join(" et ") + " (rien n'est enregistré avant).") : null);
-  });
-  const manques = maisonsManquantes(o).map((m) => h("button", { type: "button", class: "et-ajout manque", onclick: () => ajouterEtapeQuiFabrique(o, m) },
-    `⚠ « ${m.nom} » est faite maison : + ajouter l'étape qui la fabrique`));
-  const nouvelleCommune = (feuille) => () => {
-    etapes.push({ id: null, nom: "", mode: feuille ? "par_matiere" : "a_la_piece", temps_min: "", utilise: [], donne: [], feuille,
-      formats: Object.fromEntries((o.famille.variantes ?? []).map((v) => [v, ""])) });
-    etat.recetteFocus = `et-nom-${etapes.length - 1}`; dessinerRecettes();
-  };
-  if (o.type === "commune") return h("div", { class: "et-main" }, h("div", { class: "et-bloc" }, tete, ...lignes,
-    h("div", { class: "et-ajouts" },
-      h("button", { type: "button", class: "et-ajout", onclick: nouvelleCommune(true) }, "+ Étape « une feuille → plusieurs formats » (ex. Imprimer)"),
-      h("button", { type: "button", class: "et-ajout", onclick: nouvelleCommune(false) }, "+ Étape faite format par format (ex. Couper, Emballer)"))), ...manques);
-  return h("div", { class: "et-main" }, h("div", { class: "et-bloc" }, tete, ...lignes,
-    h("button", { type: "button", class: "et-ajout", onclick: () => {
-      etapes.push({ id: null, nom: "", mode: "a_la_piece", temps_min: "", utilise: [], formats: Object.fromEntries((o.famille.variantes ?? []).map((v) => [v, ""])),
-        donne: o.type === "produit" ? [{ produit_id: o.produit_id, piece_id: null, quantite: 1 }] : o.type === "piece" ? [{ piece_id: o.piece.id, produit_id: null, quantite: 1 }] : [] });
-      etat.recetteFocus = `et-nom-${etapes.length - 1}`; dessinerRecettes();
-    } }, etapes.length ? "+ Ajouter une étape" : "+ Écrire la première étape")), ...manques);
-}
-
-// Une fourniture maison utilisée mais fabriquée nulle part : nouvelle étape juste avant celle qui l'utilise.
-function ajouterEtapeQuiFabrique(o, m) {
-  const etapes = etat.travail.etapes;
-  const ligne = m.cle.startsWith("p") ? { produit_id: Number(m.cle.slice(1)), piece_id: null } : { piece_id: Number(m.cle.slice(1)), produit_id: null };
-  if (ligne.produit_id && o.type !== "produit") { flash("Cette fourniture a des variantes : écrivez l'étape dans la recette d'un produit à variantes.", true); return; }
-  const i = Math.max(0, etapes.findIndex((e) => e.utilise.some((l) => memeLigne(l, ligne))));
-  etapes.splice(i, 0, { id: null, nom: "", mode: "a_la_piece", temps_min: "", utilise: [], formats: {}, donne: [{ ...ligne, quantite: 1 }] });
-  etat.recetteFocus = `et-nom-${i}`;
-  dessinerRecettes();
-}
-
-// Case « On utilise » / « On obtient » : on y glisse (ou y pose) des ingrédients.
-function depot(o, e, i, sens) {
-  const liste = e[sens];
-  const etapes = etat.travail.etapes;
-  const lien = (l) => {
-    if (sens === "utilise") { const j = etapes.slice(0, i).findIndex((x) => x.donne.some((y) => memeLigne(y, l))); return j >= 0 ? `← étape ${j + 1}` : ""; }
-    const k = etapes.slice(i + 1).findIndex((x) => x.utilise.some((y) => memeLigne(y, l))); return k >= 0 ? `→ étape ${i + k + 2}` : "";
-  };
-  const d = h("div", { class: "depot" + (etat.ingChoisi ? " cible" : ""), "data-i": i, "data-sens": sens,
-    onclick: (ev) => { if (etat.ingChoisi && !ev.target.closest(".chip")) poserIngredient(o, etat.ingChoisi, i, sens); } },
-    h("span", { class: "lbl" }, sens === "utilise" ? "On utilise" : "On obtient"),
-    liste.length ? liste.flatMap((l, k) => [k ? h("span", { class: "plus", "aria-hidden": "true" }, "+") : null,
-      h("span", { class: "chip" + (l.produit_id ? " var" : "") },
-        h("input", { value: String(l.quantite), inputmode: "numeric", "aria-label": `Quantité de ${nomLigne(l)}`, onchange: (ev) => { l.quantite = ev.target.value; sauverEtape(o, e); } }),
-        nomLigne(l).replace(" · même variante", o.type === "commune" ? " · même format" : o.type === "produit" && o.famille.modele_non_precise ? " · même motif" : " · même variante"),
-        lien(l) ? h("span", { class: "lk" }, lien(l)) : null,
-        h("button", { type: "button", "aria-label": "Retirer " + nomLigne(l), onclick: () => { liste.splice(k, 1); sauverEtape(o, e); } }, "×"))])
-      : o.type === "commune" && sens === "donne" ? h("span", { class: "chip var implicite" }, "1 print · même format")
-      : h("span", { class: "vide2" }, etat.ingChoisi ? "touchez ici pour poser l'ingrédient choisi" : "glissez un ingrédient ici"));
-  const cv = etat.choixVariante;
-  if (cv && cv.i === i && cv.sens === sens) {
-    const vs = piecesListe().filter((p) => p.produit_id === cv.ing.produit_id);
-    d.append(h("div", { class: "choix-variante" }, h("span", {}, `Quelle ${cv.ing.nom} ?`),
-      vs.map((p) => h("button", { type: "button", class: "btn-petit", onclick: () => { etat.choixVariante = null; poserIngredient(o, { piece_id: p.id }, i, sens); } }, p.variante)),
-      h("button", { type: "button", class: "btn-petit", "aria-label": "Annuler", onclick: () => { etat.choixVariante = null; dessinerRecettes(); } }, "×")));
   }
-  return d;
-}
-
-// Recette commune (prints) : en une fois, la place pour N de chaque format ; on mélange librement.
-function exempleMelange(formats) {
-  const f = Object.entries(formats).map(([v, q]) => [v, Number(q)]).filter(([, q]) => q > 0).sort((a, b) => a[1] - b[1]);
-  if (f.length < 2) return "";
-  const pg = (a, b) => (b ? pg(b, a % b) : a);
-  const cap = f.reduce((m, [, q]) => (m / pg(m, q)) * q, 1);
-  const [grand, petit] = [f[f.length - 2], f[f.length - 1]];
-  const reste = cap - cap / grand[1];
-  const n = reste / (cap / petit[1]);
-  return Number.isInteger(n) && n > 0 ? `1 ${grand[0]} + ${n} ${petit[0]}` : "";
-}
-const texteFormats = (formats) => {
-  const f = Object.entries(formats).filter(([, q]) => String(q).trim());
-  if (!f.length) return "…";
-  const ex = exempleMelange(formats);
-  return "la place pour " + f.map(([v, q]) => `${q} ${v}`).join(", ou ") + (ex ? ` (mélange possible, ex. ${ex})` : "");
-};
-function depotFormats(o, e, i) {
-  const ex = exempleMelange(e.formats);
-  const de = e.donne[0];
-  return h("div", { class: "depot", "data-i": i, "data-sens": "donne",
-    onclick: (ev) => { if (etat.ingChoisi && !ev.target.closest(".chip")) poserIngredient(o, etat.ingChoisi, i, "donne"); } },
-    h("span", { class: "lbl" }, "On obtient la place pour"),
-    Object.keys(e.formats).flatMap((v, k) => [k ? h("span", { class: "plus" }, "ou") : null,
-      h("span", { class: "chip var" }, h("input", { value: e.formats[v], placeholder: "–", inputmode: "numeric", "aria-label": `Combien de ${v} tiennent en une fois`,
-        onchange: (ev) => { e.formats[v] = ev.target.value; sauverEtape(o, e); } }), v)]),
-    h("span", { class: "de-quoi" }, "de :",
-      de ? h("span", { class: "chip var" }, nomProduit(de.produit_id) + " · même format",
-             h("button", { type: "button", "aria-label": "Retirer", onclick: () => { e.donne = []; sauverEtape(o, e); } }, "×"))
-         : h("span", { class: "chip var implicite" }, "prints, directement"),
-      h("small", { class: "note" }, de ? "" : " (glissez ici un Tirage A3/A4/A5 s'il y a une étape après)")),
-    h("span", { class: "vide2", style: "width:100%" },
-      (ex ? `On mélange comme on veut tant que ça tient : par exemple ${ex} sur la même feuille. ` : "On mélange les formats comme on veut tant que ça tient. ")
-      + "Vide = ce format ne sort pas de cette étape."));
-}
-
-function poserIngredient(o, ingDepart, i, sens) {
-  let ing = ingDepart;
-  const e = etat.travail.etapes[i];
-  if (!e) return;
-  if (ing.produit_id) {
-    const vs = piecesListe().filter((p) => p.produit_id === ing.produit_id);
-    // « Même variante » n'a de sens que si les variantes se correspondent (Mini-presse Sauge ↔ Planchette Sauge).
-    const correspond = (o.type === "produit" && (ing.produit_id === o.produit_id || vs.some((p) => o.variantes.some((v) => v.variante === p.variante))))
-      || (o.type === "commune" && vs.some((p) => (o.famille.variantes ?? []).includes(p.variante)));
-    if (vs.length === 1) ing = { piece_id: vs[0].id };
-    else if (!correspond) { etat.choixVariante = { ing, i, sens }; etat.ingChoisi = null; dessinerRecettes(); return; }
+  for (const c of cibles) {
+    const b = c.corps;
+    c.recette = etat.recettes.find((r) => b.piece_id ? r.piece_id === b.piece_id : b.produit_id ? r.produit_id === b.produit_id : r.famille_id === b.famille_id && r.variante === b.variante) ?? null;
+    // Recette héritée (un article d'un produit ou d'une famille qui a déjà sa recette).
   }
-  if (o.type === "commune" && e.feuille && sens === "donne") {
-    if (!ing.produit_id) { flash("Ici, on pose un produit qui existe dans les mêmes formats (ex. Tirage A3/A4/A5).", true); dessinerRecettes(); return; }
-    e.donne = [{ produit_id: ing.produit_id, piece_id: null, quantite: 1 }]; etat.ingChoisi = null; sauverEtape(o, e); return;
-  }
-  const l = e[sens];
-  const ex = l.find((x) => memeLigne(x, ing));
-  if (ex) ex.quantite = Number(ex.quantite) + 1; else l.push({ piece_id: ing.piece_id ?? null, produit_id: ing.produit_id ?? null, quantite: 1 });
-  etat.ingChoisi = null;
-  sauverEtape(o, e);
+  return cibles;
 }
 
-async function deplacerEtape(e, sens) {
-  await tenter(async () => {
-    await api(`/recettes/${e.id}/deplacer`, { method: "POST", body: { sens } });
-    etat.recettes = await api("/recettes"); etat.travail = null; dessinerRecettes();
-  });
-}
-
-// ── Palette d'ingrédients : chercher, glisser, changer de groupe (achetée / faite maison / à vendre) ──
-const GROUPES_ING = [["achete", "Achetées"], ["fait_maison", "Faites maison"], ["a_vendre", "À vendre"]];
-function ingredientsDe(pieces) {
-  const out = [], vus = new Set();
-  for (const p of pieces) {
-    const n = p.produit_id ? pieces.filter((x) => x.produit_id === p.produit_id).length : 0;
-    if (p.produit_id && n > 1) {
-      if (vus.has(p.produit_id)) continue;
-      vus.add(p.produit_id);
-      out.push({ cle: "p" + p.produit_id, produit_id: p.produit_id, nom: p.produit, niveau: p.niveau, famille: p.famille, famille_id: p.famille_id, sous: `${n} var.` });
-    } else out.push({ cle: "a" + p.id, piece_id: p.id, nom: p.nom, niveau: p.niveau === "recup" ? "achete" : p.niveau, famille: p.famille, famille_id: p.famille_id, sous: p.niveau === "recup" ? "récup" : "" });
-  }
+function choixElements(c) {
+  const out = [];
+  const tous = toutesPieces().filter((p) => p.niveau !== "a_vendre" && !c.exemples.some((x) => x.id === p.id));
+  // Produits à variantes : « de la même variante » quand leurs variantes recouvrent celles de la cible.
+  const produits = new Map();
+  for (const p of toutesPieces()) if (p.produit_id && p.niveau !== "a_vendre") (produits.get(p.produit_id) ?? produits.set(p.produit_id, { nom: p.produit, variantes: new Set() }).get(p.produit_id)).variantes.add(p.variante);
+  if (c.variantes.length) for (const [id, pr] of produits) if (c.variantes.every((v) => pr.variantes.has(v))) out.push({ label: `${pr.nom} (même ${c.niveau === "a_vendre" && c.corps.famille_id ? "format" : "variante"})`, produit_id: id });
+  for (const p of tous) out.push({ label: p.nom, piece_id: p.id });
   return out;
 }
 
-function palette(o) {
-  const conteneur = h("div", { class: "pal-liste" });
-  const q = h("input", { id: "pal-q", type: "search", value: etat.palQ ?? "", placeholder: "Chercher un ingrédient…", "aria-label": "Chercher un ingrédient", autocomplete: "off" });
-  q.addEventListener("input", () => { etat.palQ = q.value; remplir(); });
-  q.addEventListener("keydown", (ev) => {
-    if (ev.key !== "Enter") return;
-    ev.preventDefault();
-    const premier = conteneur.querySelector(".ing");
-    if (premier) premier.dispatchEvent(new CustomEvent("choisir"));
+function texteQuantite(q) {
+  if (Number.isInteger(q)) return String(q);
+  for (const den of [2, 3, 4, 5, 6, 8, 10, 16, 20, 25, 45, 50]) if (Math.abs(q * den - Math.round(q * den)) < 1e-6) return `${Math.round(q * den)}/${den}`;
+  return String(q).replace(".", ",");
+}
+
+async function sauverRecette(c, pour, elements) {
+  await api("/recettes", { method: "PUT", body: { ...c.corps, pour, elements } });
+  etat.recettes = await api("/recettes");
+  dessinerRecettes();
+}
+
+function carteRecette(c, options) {
+  const r = c.recette;
+  const elements = r ? r.elements.map((e) => ({ ...e })) : [];
+  const pour = r ? r.pour : 1;
+  const nomEl = (e) => e.piece_id ? nomPiece(e.piece_id) : options.find((o) => o.produit_id === e.produit_id)?.label ?? "?";
+  const liste = "dl-" + c.cle.replace(/[^a-z0-9]/gi, "");
+  const choisir = (texte) => options.find((o) => o.label.toLowerCase() === texte.trim().toLowerCase());
+  const lignes = elements.map((e, i) => h("div", { class: "rc-ligne" },
+    h("input", { class: "pr-q", value: texteQuantite(e.quantite), "aria-label": "Quantité de " + nomEl(e), onchange: (ev) => tenter(async () => {
+      const n = elements.map((x, j) => ({ piece_id: x.piece_id, produit_id: x.produit_id, quantite: j === i ? ev.target.value : x.quantite }));
+      await sauverRecette(c, pour, n);
+    }) }),
+    h("span", {}, nomEl(e)),
+    h("button", { class: "btn-petit", "aria-label": "Retirer " + nomEl(e), onclick: () => tenter(() => sauverRecette(c, pour, elements.filter((_, j) => j !== i))) }, "×")));
+  const qNouv = h("input", { class: "pr-q", value: "1", "aria-label": "Quantité" });
+  const elNouv = h("input", { list: liste, placeholder: "chercher une fourniture…", "aria-label": "Fourniture à ajouter", class: "rc-chercher",
+    onkeydown: (ev) => { if (ev.key === "Enter") ajouter(); } });
+  const ajouter = () => tenter(async () => {
+    const o = choisir(elNouv.value);
+    if (!o) throw new Error("Choisissez une fourniture dans la liste (ou créez-la d'abord dans le Stock).");
+    await sauverRecette(c, pour, [...elements, { piece_id: o.piece_id ?? null, produit_id: o.produit_id ?? null, quantite: qNouv.value }]);
+    document.querySelector(`[data-cle="${c.cle}"] .rc-chercher`)?.focus();
   });
-  function remplir() {
-    const mots = sansAccent((etat.palQ ?? "").trim()).split(/\s+/).filter(Boolean);
-    const toutes = piecesListe();
-    if (!mots.length) {
-      const ings = ingredientsDe(toutes.filter((p) => p.famille_id === o.famille.id));
-      // Fournitures communes : familles sans article à vendre (peintures, contreplaqué…), proposées partout.
-      const communes = etat.stock.filter((f) => f.id !== o.famille.id && f.pieces.length && !f.pieces.some((p) => p.niveau === "a_vendre"));
-      conteneur.replaceChildren(...GROUPES_ING.map(([niv, titre]) => h("div", { class: "pal-groupe", "data-niveau": niv },
-        h("h5", {}, titre), ...ings.filter((x) => x.niveau === niv).map((x) => tuileIng(o, x)),
-        ings.some((x) => x.niveau === niv) ? null : h("span", { class: "note", style: "font-size:12px" }, "rien encore"))),
-        ...communes.map((f) => h("div", { class: "pal-commun" }, h("h5", {}, f.nom),
-          ...ingredientsDe(toutes.filter((p) => p.famille_id === f.id)).map((x) => tuileIng(o, x)))));
-      return;
-    }
-    const ok = (t) => mots.every((m) => sansAccent(t).includes(m));
-    const trouves = ingredientsDe(toutes).filter((x) => ok(x.nom)).sort((a, b) => (b.famille_id === o.famille.id) - (a.famille_id === o.famille.id)).slice(0, 12);
-    const texte = (etat.palQ ?? "").trim();
-    const creer = texte.length >= 2 && !trouves.some((x) => sansAccent(x.nom) === sansAccent(texte))
-      ? h("div", { class: "pal-creer" }, h("b", {}, `Créer « ${texte} »`), h("span", { class: "note" }, `dans ${o.famille.nom}, comme :`),
-          h("div", { class: "pal-creer-boutons" }, GROUPES_ING.map(([niv, titre]) => h("button", { type: "button", class: "btn-petit", onclick: () => tenter(async () => {
-            await api("/pieces", { method: "POST", body: { nom: texte, famille_id: o.famille.id, niveau: niv, suivi: "quantite" } });
-            etat.stock = await api("/stock"); etat.palQ = ""; flash(`« ${texte} » ajouté (${titre.toLowerCase()}).`); dessinerRecettes();
-            queueMicrotask(() => document.getElementById("pal-q")?.focus());
-          }) }, titre)),
-          o.famille.variantes?.length ? h("button", { type: "button", class: "btn-petit", onclick: () => tenter(async () => {
-            await api("/produits", { method: "POST", body: { nom: texte, famille_id: o.famille.id, niveau: "fait_maison", variantes: o.famille.variantes } });
-            etat.stock = await api("/stock"); etat.palQ = ""; flash(`« ${texte} » ajouté, fait maison, en ${o.famille.variantes.join(", ")}.`); dessinerRecettes();
-          }) }, `Faite maison, en ${o.famille.variantes.join(" / ")}`) : null))
-      : null;
-    conteneur.replaceChildren(...trouves.map((x) => tuileIng(o, x, x.famille_id !== o.famille.id)), creer,
-      !trouves.length && !creer ? h("span", { class: "note" }, "Encore une lettre…") : null);
+  const maison = c.niveau === "fait_maison";
+  const champPour = h("input", { class: "pr-q", value: pour === null ? "" : String(pour), placeholder: "?", "aria-label": "Pour en faire combien",
+    onchange: (ev) => tenter(async () => {
+      const v = ev.target.value.trim();
+      if (v !== "" && !/^\d+$/.test(v)) throw new Error("Un nombre entier (vide = rendement inconnu).");
+      if (!elements.length) throw new Error("Ajoutez d'abord ce qu'il faut.");
+      await sauverRecette(c, v === "" ? null : Number(v), elements);
+    }) });
+  return h("div", { class: "rc-carte", "data-cle": c.cle },
+    h("div", { class: "rc-titre" }, h("strong", {}, c.nom),
+      c.variantes.length > 1 ? h("span", { class: "pr-calc" }, " · " + (c.variantes.length > 6 ? `${c.variantes.length} modèles` : c.variantes.join(", "))) : null,
+      !r ? h("span", { class: "pr-pill " + (c.niveau === "a_vendre" ? "pr-inconnu" : "pr-sans") }, c.niveau === "a_vendre" ? "sans recette : acheté puis revendu ?" : "sans recette")
+        : r.pour === null ? h("span", { class: "pr-pill pr-bas" }, "rendement inconnu") : null),
+    h("div", { class: "rc-pour" }, "Pour en faire ", maison || (r && r.pour !== 1) ? champPour : h("strong", {}, "1"), ", il faut :"),
+    lignes,
+    h("div", { class: "rc-ligne rc-ajout" }, qNouv, elNouv, h("button", { class: "btn-petit", onclick: ajouter }, "+ ajouter"),
+      h("datalist", { id: liste }, options.map((o) => h("option", { value: o.label })))));
+}
+
+function dessinerRecettes() {
+  entete("Recettes");
+  const page = document.getElementById("page");
+  const cibles = ciblesRecettes();
+  const blocs = [h("p", { class: "note", style: "margin:0" },
+    "Ce qu'il faut pour en faire un (ou, pour une fourniture maison, pour en faire une plaque ou une feuille : 25 planchettes = 1 plaque MDF). ",
+    "« Même variante » : la planchette du même modèle, le carton du même format. Une quantité décimale (¼ = 1/4) est partagée : les prints A5 se mélangent sur une feuille A3. ",
+    "La peinture et la gomme n'ont pas de quantité : elles apparaissent seulement « à vérifier ». Un article à vendre sans recette est considéré comme acheté puis revendu.")];
+  for (const f of etat.stock) {
+    const cs = cibles.filter((c) => c.famille === f.nom);
+    if (!cs.length) continue;
+    blocs.push(h("section", { class: "carte rc-famille" }, h("h2", {}, f.nom),
+      h("div", { class: "rc-grille" }, cs.map((c) => carteRecette(c, choixElements(c))))));
   }
-  remplir();
-  return h("aside", { class: "carte et-palette" },
-    h("div", { class: "titre-pal" }, "Ingrédients"),
-    h("div", { class: "note", style: "font-size:12px" }, `Famille ${o.famille.nom}, puis les fournitures communes. Glissez-les dans une étape, ou touchez-en un puis une case ; d'un groupe à l'autre pour changer leur type. La recherche couvre toutes les familles.`),
-    q, conteneur);
+  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, ...blocs));
 }
 
-function tuileIng(o, x, autreFamille = false) {
-  const choisie = etat.ingChoisi?.cle === x.cle;
-  const t = h("div", { class: `ing ${x.niveau}${choisie ? " choisie" : ""}`, tabindex: "0", role: "button", "aria-label": `${x.nom} : glisser vers une étape` },
-    h("span", { class: "p" }), h("span", { class: "nom-ing" }, x.nom), h("small", {}, autreFamille ? x.famille : x.sous));
-  const choisir = () => { etat.ingChoisi = choisie ? null : x; dessinerRecettes(); };
-  t.addEventListener("choisir", choisir);
-  t.addEventListener("keydown", (ev) => { if (ev.key === "Enter" || ev.key === " ") { ev.preventDefault(); choisir(); } });
-  t.addEventListener("pointerdown", (e) => {
-    if (e.button !== 0) return;
-    e.preventDefault();
-    const x0 = e.clientX, y0 = e.clientY; let fant = null, cible = null;
-    const racine = document.querySelector(".rc3");
-    const bouge = (ev) => {
-      if (!fant && Math.hypot(ev.clientX - x0, ev.clientY - y0) < 6) return;
-      if (!fant) { fant = t.cloneNode(true); fant.classList.add("fantome"); document.body.append(fant); racine?.classList.add("en-glisse"); }
-      fant.style.left = ev.clientX + "px"; fant.style.top = ev.clientY + "px";
-      const c = document.elementFromPoint(ev.clientX, ev.clientY)?.closest(".depot[data-sens], .pal-groupe");
-      if (cible && cible !== c) cible.classList.remove("survol");
-      cible = c; c?.classList.add("survol");
-    };
-    const fin = () => {
-      removeEventListener("pointermove", bouge); removeEventListener("pointerup", fin); removeEventListener("pointercancel", fin);
-      racine?.classList.remove("en-glisse");
-      if (!fant) { choisir(); return; }
-      fant.remove();
-      document.querySelectorAll(".survol").forEach((x) => x.classList.remove("survol"));
-      if (!cible) return;
-      if (cible.classList.contains("pal-groupe")) changerType(x, cible.dataset.niveau);
-      else poserIngredient(o, x, Number(cible.dataset.i), cible.dataset.sens);
-    };
-    addEventListener("pointermove", bouge); addEventListener("pointerup", fin); addEventListener("pointercancel", fin);
-  });
-  return t;
-}
-
-async function changerType(x, niveau) {
-  if (x.niveau === niveau) return;
-  await tenter(async () => {
-    const ids = x.produit_id ? piecesListe().filter((p) => p.produit_id === x.produit_id).map((p) => p.id) : [x.piece_id];
-    for (const id of ids) await api("/pieces/" + id, { method: "PATCH", body: { niveau } });
-    etat.stock = await api("/stock");
-    flash(`« ${x.nom} » est maintenant : ${NIVEAUX[niveau].toLowerCase()}.`);
-    dessinerRecettes();
-  });
-}
-
-// ───────────── Recettes (Réglages) ─────────────
-const MODES = { par_matiere: "Par matière entière (une plaque, une feuille…)", a_la_piece: "À la pièce" };
-
+// ───────────── Choisir un article ou une fourniture ─────────────
 function toutesPieces() {
   return etat.stock.flatMap((f) => f.pieces.map((p) => ({ ...p, famille: f.nom })));
 }
@@ -1320,342 +1274,6 @@ const corpsReponse = (lignes) => ({
   familles: lignes.filter((l) => l.famille_id).map((l) => ({ famille_id: l.famille_id, quantite: Number(l.quantite) })),
 });
 const estFourniture = (id) => { const p = toutesPieces().find((x) => x.id === id); return !!p && p.niveau !== "a_vendre"; };
-
-function resumeEtape(e) {
-  const util = e.utilise.length ? e.utilise.map((u) => `${u.quantite} ${u.nom}`).join(" + ") : "rien";
-  const donne = e.donne.map((d) => d.au_choix
-    ? `${d.quantite} part(s) au choix parmi ${d.choix.map((c) => `${c.nom}${c.poids > 1 ? ` (${c.poids} parts)` : ""}`).join(", ")}`
-    : `${d.quantite} ${d.nom}`).join(" + ");
-  return `${util} → ${donne}`;
-}
-function texteTemps(e) {
-  if (e.temps_min === null || e.temps_min === undefined) return "temps non renseigné";
-  return `${e.temps_min} min ${e.mode === "par_matiere" ? "par matière entière" : "par pièce"}`;
-}
-
-function nouvelEditeur(famille_id, e) {
-  if (!e) return { id: null, famille_id, nom: "", mode: "a_la_piece", temps_min: "", ordre: 0, utilise: [], donne: [{ au_choix: false, piece_id: null, quantite: 1 }] };
-  return {
-    id: e.id, famille_id: e.famille_id, nom: e.nom, mode: e.mode, temps_min: e.temps_min ?? "", ordre: e.ordre,
-    utilise: e.utilise.map((u) => ({ piece_id: u.piece_id, quantite: u.quantite })),
-    donne: e.donne.map((d) => d.au_choix
-      ? { au_choix: true, quantite: d.quantite, choix: d.choix.map((c) => ({ piece_id: c.piece_id, poids: c.poids })) }
-      : { au_choix: false, piece_id: d.piece_id, quantite: d.quantite }),
-  };
-}
-
-function sectionsRecettes() {
-  return etat.familles.map((f) => {
-    const etapes = etat.etapes.filter((e) => e.famille_id === f.id);
-    const ed = etat.editeur && etat.editeur.famille_id === f.id ? etat.editeur : null;
-    return h("section", { class: "carte" },
-      h("h2", {}, "Recette · " + f.nom),
-      etapes.length
-        ? h("table", { class: "tbl" }, h("tbody", {}, etapes.map((e) => h("tr", {},
-            h("td", { style: "font-weight:600;width:200px" }, e.nom),
-            h("td", {}, resumeEtape(e), h("div", { class: "note", style: "font-size:13px" }, (e.mode === "par_matiere" ? "Par matière entière" : "À la pièce") + " · " + texteTemps(e))),
-            h("td", { class: "col-action" }, h("div", { class: "actions-ligne" },
-              h("button", { class: "btn-petit", disabled: !!etat.editeur, onclick: () => { etat.editeur = nouvelEditeur(f.id, e); dessinerReglages(); } }, "Modifier"),
-              h("button", { class: "btn-petit", disabled: !!etat.editeur, onclick: () => tenter(async () => {
-                if (!confirm(`Supprimer l'étape « ${e.nom} » ?`)) return;
-                await api("/etapes/" + e.id, { method: "DELETE" });
-                flash("Étape supprimée.");
-                await pageReglages();
-              }) }, "Supprimer")))))))
-        : h("div", { class: "vide" }, "Aucune étape : comment fabrique-t-on les articles de cette famille ?"),
-      ed ? editeurEtape(ed) : h("div", { class: "formulaire" },
-        h("button", { class: "btn-sec", disabled: !!etat.editeur || !toutesPieces().length, onclick: () => { etat.editeur = nouvelEditeur(f.id); dessinerReglages(); } }, "Ajouter une étape")),
-    );
-  });
-}
-
-function editeurEtape(ed) {
-  const redessiner = () => dessinerReglages();
-  const ligneQte = (obj, cle, label, min = 1) => h("input", {
-    type: "number", min: String(min), step: "1", class: "compte", "aria-label": label, value: String(obj[cle]),
-    oninput: (e) => { obj[cle] = e.target.value; },
-  });
-  const retirer = (liste, i) => h("button", { type: "button", class: "btn-petit", onclick: () => { liste.splice(i, 1); redessiner(); } }, "Retirer");
-
-  const utilise = h("div", { class: "bloc-editeur" },
-    h("strong", {}, "Utilise"),
-    ed.utilise.length ? null : h("div", { class: "note" }, "Rien (ex. une étape qui ne consomme aucune fourniture suivie)."),
-    ed.utilise.map((u, i) => h("div", { class: "ligne-editeur" },
-      selectPiece(u.piece_id, (v) => { u.piece_id = v; }, "Ce qu'elle utilise"), ligneQte(u, "quantite", "Quantité utilisée"), retirer(ed.utilise, i))),
-    h("button", { type: "button", class: "btn-petit", onclick: () => { ed.utilise.push({ piece_id: null, quantite: 1 }); redessiner(); } }, "+ ce qu'elle utilise"),
-  );
-
-  const donne = h("div", { class: "bloc-editeur" },
-    h("strong", {}, "Donne"),
-    ed.donne.map((d, i) => d.au_choix
-      ? h("div", { class: "choix-editeur" },
-          h("div", { class: "ligne-editeur" },
-            h("span", {}, "Au choix, capacité"), ligneQte(d, "quantite", "Capacité (parts)"), h("span", { class: "note" }, "part(s)"), retirer(ed.donne, i)),
-          d.choix.map((c, j) => h("div", { class: "ligne-editeur" },
-            selectPiece(c.piece_id, (v) => { c.piece_id = v; }, "Au choix"),
-            ligneQte(c, "poids", "Parts prises"), h("span", { class: "note" }, "part(s)"), retirer(d.choix, j))),
-          h("button", { type: "button", class: "btn-petit", onclick: () => { d.choix.push({ piece_id: null, poids: 1 }); redessiner(); } }, "+ une possibilité"))
-      : h("div", { class: "ligne-editeur" },
-          selectPiece(d.piece_id, (v) => { d.piece_id = v; }, "Ce qu'elle donne"), ligneQte(d, "quantite", "Quantité donnée"), retirer(ed.donne, i))),
-    h("div", { class: "ligne-editeur" },
-      h("button", { type: "button", class: "btn-petit", onclick: () => { ed.donne.push({ au_choix: false, piece_id: null, quantite: 1 }); redessiner(); } }, "+ ce qu'elle donne"),
-      h("button", { type: "button", class: "btn-petit", onclick: () => { ed.donne.push({ au_choix: true, quantite: 4, choix: [{ piece_id: null, poids: 1 }, { piece_id: null, poids: 1 }] }); redessiner(); } }, "+ sortie au choix (ex. prints)")),
-  );
-
-  const nom = h("input", { id: "ed-nom", value: ed.nom, placeholder: "ex. Peindre et découper", oninput: (e) => { ed.nom = e.target.value; } });
-  const mode = h("select", { id: "ed-mode", onchange: (e) => { ed.mode = e.target.value; redessiner(); } },
-    Object.entries(MODES).map(([k, v]) => h("option", { value: k, selected: ed.mode === k }, v)));
-  const temps = h("input", { id: "ed-temps", type: "number", min: "0", step: "any", value: String(ed.temps_min), style: "width:110px", oninput: (e) => { ed.temps_min = e.target.value; } });
-
-  const enregistrer = () => tenter(async () => {
-    const corps = {
-      famille_id: ed.famille_id, nom: ed.nom, mode: ed.mode, temps_min: ed.temps_min === "" ? null : Number(ed.temps_min), ordre: ed.ordre,
-      utilise: ed.utilise.map((u) => ({ piece_id: u.piece_id, quantite: Number(u.quantite) })),
-      donne: ed.donne.map((d) => d.au_choix
-        ? { au_choix: true, quantite: Number(d.quantite), choix: d.choix.map((c) => ({ piece_id: c.piece_id, poids: Number(c.poids) })) }
-        : { piece_id: d.piece_id, quantite: Number(d.quantite) }),
-    };
-    if ([...corps.utilise, ...corps.donne.filter((d) => !d.au_choix), ...corps.donne.flatMap((d) => d.choix ?? [])].some((x) => !x.piece_id))
-      throw new Error("Choisissez sur chaque ligne (ou retirez la ligne).");
-    await api(ed.id ? "/etapes/" + ed.id : "/etapes", { method: ed.id ? "PUT" : "POST", body: corps });
-    etat.editeur = null;
-    flash(ed.id ? "Étape modifiée. Ce qui a déjà été fait reste tel quel dans l'historique." : "Étape ajoutée.");
-    await pageReglages();
-  });
-
-  return h("div", { class: "editeur" },
-    h("div", { class: "formulaire", style: "padding:0" },
-      h("label", { for: "ed-nom" }, "Nom de l'étape", nom),
-      h("label", { for: "ed-mode" }, "Se fait", mode),
-      h("label", { for: "ed-temps" }, ed.mode === "par_matiere" ? "Temps par matière entière (min)" : "Temps par pièce (min)", temps)),
-    h("p", { class: "note", style: "margin:0;font-size:13px" }, ed.mode === "par_matiere"
-      ? "Quantités pour UNE matière entière (une plaque, une feuille). Le rendement indiqué est une valeur de départ : la quantité réellement obtenue se déclare à « C'est fait »."
-      : "Quantités pour UNE unité faite."),
-    utilise, donne,
-    h("div", { class: "barre-comptage" },
-      h("button", { class: "btn-sec", onclick: () => { etat.editeur = null; dessinerReglages(); } }, "Annuler"),
-      h("button", { class: "btn", onclick: enregistrer }, "Enregistrer l'étape")),
-  );
-}
-
-// ───────────── Atelier ─────────────
-async function pageAtelier() {
-  [etat.plan, etat.etapes, etat.stock, etat.faites] = await Promise.all([api("/atelier"), api("/etapes"), api("/stock"), api("/etapes-faites")]);
-  dessinerAtelier();
-}
-
-function stockDe(id) {
-  return toutesPieces().find((p) => p.id === id)?.stock ?? 0;
-}
-
-function ouvrirFait(cle, e, pre = {}) {
-  etat.fait = { cle, etape_id: e.id, fois: String(pre.fois ?? 1), donne: { ...(pre.donne ?? {}) }, touche: new Set(), manque: null, comptages: {} };
-  dessinerAtelier();
-}
-
-function dessinerAtelier() {
-  entete("Atelier");
-  const page = document.getElementById("page");
-  const plan = etat.plan;
-  const blocs = [];
-
-  if (!plan || !plan.preparation) {
-    blocs.push(h("div", { class: "carte" }, h("div", { class: "vide" },
-      "Aucun salon à venir. Ajoutez le prochain salon dans ", h("a", { href: "#salons" }, "Salons"), " et fixez ses objectifs : l'Atelier dira quoi faire, dans l'ordre.")));
-  } else {
-    const premier = plan.salons[0];
-    const j = joursEntre(new Date().toISOString().slice(0, 10), premier.date_debut);
-    const nom = plan.salons.map((s) => s.nom).join(" + ");
-    const temps = plan.travail_min ? "≈ " + dureeTexte(plan.travail_min) : "—";
-    blocs.push(h("section", { class: "bandeau" },
-      h("div", {}, h("span", { class: "note" }, "On prépare"), h("strong", {}, nom)),
-      h("div", {}, h("span", { class: "note" }, "Tout prêt avant"), h("strong", {}, `le ${fmtDate(premier.date_debut)} · ${j > 0 ? `dans ${j} jour${j > 1 ? "s" : ""}` : "c'est maintenant"}`)),
-      h("div", {}, h("span", { class: "note" }, "Travail restant"), h("strong", {}, temps),
-        h("span", { class: "note", style: "font-size:12px" }, "en ne comptant que ce qu'il reste à faire" + (plan.etapes_sans_temps ? ` · ${plan.etapes_sans_temps} étape(s) sans temps renseigné` : "")))));
-
-    if (plan.problemes.length) blocs.push(h("div", { class: "question" }, h("strong", {}, "À régler"), plan.problemes.map((p) => h("div", {}, p))));
-
-    const aFaire = plan.articles.filter((a) => a.manque > 0);
-    const prets = plan.articles.filter((a) => a.manque === 0);
-    if (!plan.articles.length) {
-      blocs.push(h("div", { class: "carte" }, h("div", { class: "vide" }, "Aucun objectif pour cette préparation. ",
-        h("a", { href: "#objectifs/" + plan.preparation.id }, "Fixer les objectifs"), ".")));
-    } else {
-      blocs.push(h("p", { class: "note", style: "margin:0" },
-        "Pour chaque article, l'outil part de ce qui est déjà en fourniture maison et ne propose de refaire une étape que si la réserve ne suffit pas. Les étapes sont numérotées dans l'ordre où les faire."));
-      blocs.push(...aFaire.map(carteArticle));
-      if (prets.length) blocs.push(h("div", { class: "note" }, h("strong", {}, "Déjà prêt : "), prets.map((a) => `${a.nom} (${a.prets}/${a.a_avoir})`).join(", ")));
-      if (plan.a_acheter.length) blocs.push(h("section", { class: "carte" }, h("h2", {}, "Il manque des fournitures"),
-        h("table", { class: "tbl" }, h("tbody", {}, plan.a_acheter.map((x) => h("tr", {}, h("td", { style: "font-weight:600" }, x.nom), h("td", { class: "num qte" }, x.manque)))))));
-    }
-  }
-
-  // Toutes les étapes : pour noter ce qui a été fait hors plan.
-  const toutes = h("details", { class: "carte", open: !plan?.preparation || !etat.plan?.articles?.length ? true : null },
-    h("summary", { class: "resume-details" }, "Toutes les étapes (pour noter un travail fait hors de cette liste)"),
-    etat.etapes.length
-      ? etat.stock.filter((f) => etat.etapes.some((e) => e.famille_id === f.id)).map((f) =>
-          h("div", {}, h("h3", { class: "sous-titre" }, f.nom), h("div", { class: "liste-etapes" }, etat.etapes.filter((e) => e.famille_id === f.id).map((e) => carteEtape(e)))))
-      : h("div", { class: "vide" }, "Aucune recette. Décrivez les étapes dans ", h("a", { href: "#recettes" }, "Recettes"), "."));
-  blocs.push(toutes);
-
-  if (etat.faites.length) blocs.push(h("section", { class: "carte" }, h("h2", {}, "Dernières saisies"),
-    h("table", { class: "tbl" }, h("tbody", {}, etat.faites.map((x) => h("tr", {},
-      h("td", {}, new Date(x.date).toLocaleString("fr-FR", { dateStyle: "short", timeStyle: "short" })),
-      h("td", { style: "font-weight:600" }, x.nom), h("td", { class: "num" }, "× " + x.fois),
-      h("td", { class: "col-action" }, h("div", { class: "actions-ligne" }, h("button", { class: "btn-petit", onclick: () => tenter(async () => {
-        if (!confirm(`Annuler la saisie « ${x.nom} × ${x.fois} » ? Ce qui a été utilisé revient en stock, ce qui a été obtenu est retiré.`)) return;
-        await api("/etapes-faites/" + x.id, { method: "DELETE" });
-        flash("Saisie annulée.");
-        await pageAtelier();
-      }) }, "Annuler cette saisie")))))))));
-
-  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, ...blocs));
-}
-
-function carteArticle(a) {
-  const plan = etat.plan;
-  const split = a.par_salon.filter((x) => x.retenu).map((x) => `${x.retenu} à ${plan.salons.find((s) => s.id === x.salon_id)?.nom}`).join(", ");
-  const travaux = plan.travaux.filter((t) => t.sert.includes(a.piece_id));
-  const reserve = travaux.flatMap((t) => t.donne.filter((g) => g.reserve > 0).map((g) => `${g.reserve} ${g.nom}`));
-  return h("section", { class: "carte" },
-    h("div", { class: "tete-article" },
-      h("div", {}, h("h2", { style: "padding:0" }, a.nom), h("div", { class: "note" }, `objectif ${a.a_avoir}${split ? ` (${split} + marge)` : ""} · ${a.prets} prêt${a.prets > 1 ? "s" : ""}`)),
-      h("div", { class: "manque" }, "il en manque ", h("strong", {}, a.manque))),
-    reserve.length ? h("div", { class: "note", style: "padding:0 14px 6px" }, "Partira en réserve (fourniture maison) : " + reserve.join(", ")) : null,
-    travaux.length
-      ? h("div", { class: "liste-etapes" }, travaux.map((t) => etapePlan(t, a)))
-      : h("div", { class: "vide" }, "Aucune étape ne fabrique cet article : décrivez-la dans Réglages."));
-}
-
-function etapePlan(t, a) {
-  const e = etat.etapes.find((x) => x.id === t.etape_id);
-  const cle = `${a.piece_id}:${t.etape_id}`;
-  const enCours = etat.fait && etat.fait.cle === cle;
-  const autres = t.sert.filter((id) => id !== a.piece_id).map((id) => etat.plan.articles.find((x) => x.piece_id === id)?.nom).filter(Boolean);
-  const donne = t.donne.map((g) => `${g.quantite} ${g.nom}` + (g.reserve > 0 ? ` (dont ${g.reserve} en réserve)` : "")).join(", ")
-    + (t.parts_libres ? ` · ${t.parts_libres} part(s) libre(s), au choix` : "");
-  const entrees = t.entrees.map((x) => {
-    if (x.sans_quantite) return h("li", { class: x.presque_vide ? "manque-txt" : "" }, x.presque_vide ? `⚠ ${x.nom} : pot presque vide` : `✓ ${x.nom}`);
-    if (x.manque > 0) return h("li", { class: "manque-txt" }, `⚠ ${x.besoin} ${x.nom} : il en manque ${x.manque} → à acheter`);
-    if (x.fait_avant > 0) return h("li", {}, `↑ ${x.besoin} ${x.nom}` + (x.en_stock ? ` (${x.en_stock} en stock + ${x.fait_avant} faits juste avant)` : " : faits juste avant"));
-    return h("li", {}, `✓ ${x.besoin} ${x.nom} en stock`);
-  });
-  const pre = { fois: t.fois, donne: Object.fromEntries(e?.donne.some((d) => d.au_choix) ? t.donne.map((g) => [g.piece_id, String(g.quantite)]) : []) };
-  return h("div", { class: "etape" },
-    h("div", { class: "etape-tete" },
-      h("div", {}, h("span", { class: "numero" }, t.numero), " ",
-        h("strong", {}, `${e?.nom ?? "?"} × ${t.fois}`), h("span", { class: "note" }, e?.mode === "par_matiere" ? " (matières entières)" : ""),
-        h("div", { class: "note", style: "font-size:13px" }, "donne " + donne + (autres.length ? ` · sert aussi à : ${autres.join(", ")}` : ""))),
-      h("div", { class: "actions-ligne" },
-        h("span", { class: "note" }, t.temps_min === null ? "temps ?" : dureeTexte(t.temps_min)),
-        enCours || !e ? null : h("button", { class: "btn-sec", disabled: !!etat.fait, onclick: () => ouvrirFait(cle, e, pre) }, "C'est fait…"))),
-    entrees.length ? h("ul", { class: "entrees" }, entrees) : null,
-    enCours ? panneauFait(e) : null);
-}
-
-function carteEtape(e) {
-  const cle = "toutes:" + e.id;
-  const utilise = e.utilise.map((u) => u.suivi === "quantite"
-    ? h("li", {}, `${u.quantite} ${u.nom}`, h("span", { class: "note" }, ` · en stock : ${stockDe(u.piece_id)}`))
-    : h("li", {}, `${u.nom}`, h("span", { class: "note" }, " · sans quantité")));
-  const enCours = etat.fait && etat.fait.cle === cle;
-  return h("div", { class: "etape" },
-    h("div", { class: "etape-tete" },
-      h("div", {}, h("strong", {}, e.nom), h("div", { class: "note", style: "font-size:13px" }, (e.mode === "par_matiere" ? "Par matière entière" : "À la pièce") + " · " + texteTemps(e))),
-      enCours ? null : h("button", { class: "btn-sec", disabled: !!etat.fait, onclick: () => ouvrirFait(cle, e) }, "C'est fait…")),
-    h("div", { class: "etape-corps" },
-      h("div", {}, h("div", { class: "note" }, "Utilise"), utilise.length ? h("ul", {}, utilise) : h("div", {}, "rien")),
-      h("div", {}, h("div", { class: "note" }, "Donne"), h("ul", {}, e.donne.map((d) => d.au_choix
-        ? h("li", {}, `${d.quantite} part(s) au choix : ${d.choix.map((c) => c.nom).join(", ")}`)
-        : h("li", {}, `${d.quantite} ${d.nom}`, h("span", { class: "note" }, ` · en stock : ${stockDe(d.piece_id)}`)))))),
-    enCours ? panneauFait(e) : null,
-  );
-}
-
-function prevuSimple(e, d, fois) { return d.quantite * (Number(fois) || 0); }
-
-function panneauFait(e) {
-  const f = etat.fait;
-  const majs = []; // mises à jour sur place quand le nombre change (pas de redessin : il ferait perdre un clic)
-  const fois = () => Number(f.fois) || 0;
-  const sorties = [];
-  for (const d of e.donne) {
-    if (!d.au_choix) {
-      if (e.mode === "par_matiere") {
-        const input = h("input", { type: "number", min: "0", step: "1", class: "compte",
-          oninput: (ev) => { f.donne[d.piece_id] = ev.target.value; f.touche.add(d.piece_id); } });
-        const prevu = h("span", { class: "note" });
-        majs.push(() => {
-          prevu.textContent = `prévu : ${prevuSimple(e, d, fois())}`;
-          if (!f.touche.has(d.piece_id)) { f.donne[d.piece_id] = String(prevuSimple(e, d, fois())); input.value = f.donne[d.piece_id]; }
-        });
-        if (f.touche.has(d.piece_id)) input.value = f.donne[d.piece_id];
-        sorties.push(h("label", { class: "ligne-editeur" }, h("span", { style: "min-width:220px" }, `${d.nom} obtenus`), input, prevu));
-      } else {
-        const t = h("div", {});
-        majs.push(() => { t.textContent = `${prevuSimple(e, d, fois())} ${d.nom}`; });
-        sorties.push(t);
-      }
-    } else {
-      const parts = h("span", { class: "note" });
-      const majParts = () => {
-        const capacite = d.quantite * fois();
-        const u = d.choix.reduce((t, c) => t + (Number(f.donne[c.piece_id]) || 0) * c.poids, 0);
-        parts.textContent = `${u} part(s) sur ${capacite}`;
-        parts.style.color = u > capacite ? "var(--alerte)" : "";
-      };
-      majs.push(majParts);
-      sorties.push(h("div", { class: "choix-editeur" },
-        h("div", {}, "Qu'est-ce qui est sorti ? ", parts),
-        d.choix.map((c) => h("label", { class: "ligne-editeur" }, h("span", { style: "min-width:220px" }, c.nom + (c.poids > 1 ? ` (${c.poids} parts)` : "")),
-          h("input", { type: "number", min: "0", step: "1", class: "compte", value: f.donne[c.piece_id] ?? "", placeholder: "0",
-            oninput: (ev) => { f.donne[c.piece_id] = ev.target.value; majParts(); } })))));
-    }
-  }
-  const toutMettreAJour = () => majs.forEach((m) => m());
-  toutMettreAJour();
-
-  const questions = f.manque ? h("div", { class: "question" },
-    h("strong", {}, "Une question avant d'enregistrer"),
-    f.manque.map((m) => h("label", { class: "ligne-editeur" },
-      h("span", {}, `Selon l'outil il ne restait que ${m.stock} ${m.nom} (il en faut ${m.besoin}). Combien en aviez-vous vraiment ?`),
-      h("input", { type: "number", min: "0", step: "1", class: "compte", value: f.comptages[m.piece_id] ?? "",
-        oninput: (ev) => { f.comptages[m.piece_id] = ev.target.value; } })))) : null;
-
-  const valider = () => tenter(async () => {
-    const fois = Number(f.fois);
-    if (!Number.isInteger(fois) || fois < 1) throw new Error("Indiquez un nombre entier, 1 ou plus.");
-    const donne = Object.entries(f.donne).filter(([, v]) => v !== "" && v !== undefined).map(([pid, v]) => ({ piece_id: Number(pid), quantite: Number(v) }));
-    const comptages = Object.entries(f.comptages).filter(([, v]) => v !== "").map(([pid, v]) => ({ piece_id: Number(pid), compte: Number(v) }));
-    const r = await fetch("/api/etapes/" + e.id + "/faite", {
-      method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ fois, donne: e.mode === "par_matiere" || e.donne.some((d) => d.au_choix) ? donne : undefined, comptages }),
-    });
-    const data = await r.json().catch(() => ({}));
-    if (r.status === 409 && data.manque) {
-      const avant = f.manque;
-      f.manque = data.manque;
-      dessinerAtelier();
-      if (avant && comptages.length) flash("Même avec ces chiffres, il n'y en a pas assez pour cette quantité. Vérifiez le nombre de fois ou le comptage.", true);
-      return;
-    }
-    if (!r.ok) throw new Error(data.erreur || "Le serveur n'a pas répondu correctement.");
-    etat.fait = null;
-    flash("C'est noté : " + data.sorties.map((s) => `+${s.quantite} ${nomPiece(s.piece_id)}`).join(", ") + ".");
-    await pageAtelier();
-  });
-
-  return h("div", { class: "panneau-fait" },
-    h("label", { class: "ligne-editeur" },
-      h("span", { style: "min-width:220px;font-weight:600" }, e.mode === "par_matiere" ? "Combien de matières entières (plaques, feuilles) ?" : "Combien en avez-vous fait ?"),
-      h("input", { type: "number", min: "1", step: "1", class: "compte", value: f.fois, oninput: (ev) => { f.fois = ev.target.value; toutMettreAJour(); } })),
-    sorties, questions,
-    h("div", { class: "barre-comptage" },
-      h("button", { class: "btn-sec", onclick: () => { etat.fait = null; dessinerAtelier(); } }, "Annuler"),
-      h("button", { class: "btn", onclick: valider }, "Enregistrer")),
-  );
-}
 
 // ───────────── Dates ─────────────
 const fmtDate = (d) => new Date(d + "T00:00:00Z").toLocaleDateString("fr-FR", { day: "numeric", month: "short", timeZone: "UTC" });
@@ -1755,7 +1373,7 @@ function dessinerSalons() {
     const premier = d.salons.find((s) => s.id === prep.id);
     const j = joursEntre(d.aujourdhui, premier.date_debut);
     const phases = [
-      { label: "Objectifs", fait: prep.nb_objectifs > 0, quand: prep.nb_objectifs ? `${prep.nb_objectifs} fixé(s)` : "à fixer" },
+      { label: "Préparation", fait: false, quand: "quoi produire, fournitures à vérifier, ce qu'on a produit" },
       { label: "Comptage avant", fait: !!prep.comptage_avant, quand: prep.comptage_avant ? "fait le " + fmtDate(prep.comptage_avant.slice(0, 10)) : "juste avant de charger le stand" },
       { label: "Bilan", fait: false, quand: "après le salon : espèces à recopier, « mal exposé » à cocher" },
     ];
@@ -1764,7 +1382,7 @@ function dessinerSalons() {
       h("div", { class: "note", style: "padding:0 14px" }, `Tout prêt avant le ${fmtDateLongue(premier.date_debut)} · ${j > 0 ? `dans ${j} jour${j > 1 ? "s" : ""}` : "c'est maintenant"}`),
       h("ol", { class: "phases" }, phases.map((ph) => h("li", { class: ph.fait ? "fait" : "" }, h("strong", {}, (ph.fait ? "✓ " : "") + ph.label), h("span", { class: "note" }, ph.quand)))),
       h("div", { class: "formulaire" },
-        h("button", { class: "btn", onclick: () => { location.hash = "objectifs/" + prep.id; } }, "Fixer les objectifs"),
+        h("button", { class: "btn", onclick: () => { location.hash = "preparation"; } }, "Ouvrir la préparation"),
         h("button", { class: "btn-sec", onclick: () => { location.hash = "stock/avant/" + prep.id; } }, prep.comptage_avant ? "Refaire le comptage avant" : "Faire le comptage avant")),
     );
   }
@@ -1794,84 +1412,6 @@ function dessinerSalons() {
   );
 
   page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, preparation, timeline, tablePasses));
-}
-
-// ───────────── Objectifs ─────────────
-async function pageObjectifs(prepId) {
-  etat.objectifs = await api(`/preparations/${prepId}/objectifs`);
-  dessinerObjectifs();
-}
-
-function dessinerObjectifs() {
-  const d = etat.objectifs;
-  const nom = d.salons.map((s) => s.nom).join(" + ");
-  entete("Objectifs · " + nom, h("button", { class: "btn-sec", onclick: () => { location.hash = "salons"; } }, "← Salons"));
-  const page = document.getElementById("page");
-  const marge = Math.round(d.reglages.marge * 100);
-  const premier = d.salons[0];
-
-  const changer = (a, s, valeur) => tenter(async () => {
-    await api("/objectifs", { method: "PUT", body: { salon_id: s.salon_id, piece_id: a.id, retenu: valeur } });
-    s.retenu = valeur === null ? null : Number(valeur);
-    const retenus = a.par_salon.filter((x) => x.retenu !== null).map((x) => x.retenu);
-    a.a_avoir = !retenus.length ? 0 : d.reglages.marge_unique
-      ? Math.ceil(retenus.reduce((x, y) => x + y, 0) * (1 + d.reglages.marge) - 1e-9)
-      : retenus.reduce((t, r) => t + Math.ceil(r * (1 + d.reglages.marge) - 1e-9), 0);
-    dessinerObjectifs();
-  });
-
-  const tamponsPrevus = h("section", { class: "carte" },
-    h("h2", {}, "1. Combien de tampons pour chaque salon ?"),
-    h("p", { class: "note", style: "margin:0;padding:0 14px 8px" }, "Les tampons servent de thermomètre : leur présentoir est impossible à manquer, donc leurs ventes reflètent le passage réel devant le stand. On les prévoit à partir du salon passé le plus comparable."),
-    h("table", { class: "tbl" }, h("tbody", {}, d.salons.map((s) => {
-      const tp = d.tampons_prevus.find((x) => x.salon_id === s.id);
-      return h("tr", {},
-        h("td", { style: "font-weight:600" }, s.nom),
-        h("td", { class: "note" }, tp.calcul),
-        h("td", { class: "num", style: "width:220px" }, h("div", { class: "pas", style: "justify-content:flex-end" },
-          h("input", { class: "compte", type: "number", min: "0", step: "1", value: tp.manuel ? String(tp.tampons) : "", placeholder: tp.tampons === null ? "?" : String(tp.tampons), "aria-label": "Tampons prévus pour " + s.nom,
-            onchange: (e) => tenter(async () => {
-              await api("/salons/" + s.id, { method: "PATCH", body: { tampons_prevus: e.target.value === "" ? null : Number(e.target.value) } });
-              await pageObjectifs(d.preparation.id);
-            }) }),
-          h("span", { class: "note", style: "font-size:12px" }, tp.manuel ? "(vide = calcul)" : "tampons"))));
-    }))));
-  const conseilles = d.articles.flatMap((a) => a.par_salon.filter((s) => s.conseille !== null).map((s) => ({ salon_id: s.salon_id, piece_id: a.id, retenu: s.conseille })));
-  const prendre = conseilles.length ? h("button", { class: "btn-sec", onclick: () => tenter(async () => {
-    if (!confirm(`Remplacer les objectifs par les ${conseilles.length} valeurs conseillées ? Les articles sans conseil gardent leur objectif.`)) return;
-    await api("/objectifs/lot", { method: "PUT", body: { lignes: conseilles } });
-    flash("Objectifs conseillés repris : ajustez avec − / + si besoin.");
-    await pageObjectifs(d.preparation.id);
-  }) }, "Prendre les objectifs conseillés") : null;
-
-  const familles = [...new Set(d.articles.map((a) => a.famille))];
-  const cartes = familles.map((f) => h("section", { class: "carte" },
-    h("h2", {}, f),
-    h("table", { class: "tbl" },
-      h("thead", {}, h("tr", {}, h("th", {}, "Article"), h("th", { class: "num" }, "Prêts"),
-        d.salons.map((s) => h("th", {}, s.nom)), h("th", { class: "num" }, `À avoir le ${fmtDate(premier.date_debut)}`))),
-      h("tbody", {}, d.articles.filter((a) => a.famille === f).map((a) => h("tr", {},
-        h("td", {}, h("strong", {}, a.nom), a.par_salon[0]?.calcul ? h("div", { class: "note", style: "font-size:12px;max-width:340px" }, a.par_salon[0].calcul) : null),
-        h("td", { class: "num" }, a.stock),
-        a.par_salon.map((s) => h("td", {}, h("div", { class: "pas" },
-          h("button", { class: "btn-petit", "aria-label": "Moins", disabled: !s.retenu, onclick: () => changer(a, s, Math.max(0, (s.retenu ?? 0) - 1)) }, "−"),
-          h("input", { class: "compte", type: "number", min: "0", step: "1", value: s.retenu ?? "", placeholder: "—", "aria-label": `Objectif ${a.nom}`,
-            onchange: (e) => changer(a, s, e.target.value === "" ? null : Number(e.target.value)) }),
-          h("button", { class: "btn-petit", "aria-label": "Plus", onclick: () => changer(a, s, (s.retenu ?? 0) + 1) }, "+"),
-          h("span", { class: "note", style: "font-size:12px", title: s.calcul ?? "" }, s.conseille === null ? "" : "conseillé " + s.conseille)))),
-        h("td", { class: "num qte" }, a.a_avoir || "—")))))));
-
-  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" },
-    h("p", { class: "note", style: "margin:0" },
-      `Fixez combien vous voulez vendre de chaque article à chaque salon. « À avoir » = la somme + ${marge} % de marge${d.reglages.marge_unique ? ", appliquée une seule fois pour la préparation" : ""}. ` +
-      "Conseillé = tampons prévus × ventes pour 100 tampons au meilleur salon passé × part du modèle. L'outil conseille, vous fixez."),
-    h("div", { class: "note", style: "font-size:13px" }, "Confiance : " + d.confiance + "."),
-    tamponsPrevus,
-    h("h2", { style: "margin:0;font-size:18px" }, "2. Les articles, à partir des tampons"),
-    prendre,
-    d.articles.length ? cartes : h("div", { class: "carte" }, h("div", { class: "vide" }, "Aucun article à vendre. Créez-les dans Réglages.")),
-    h("div", { class: "barre-comptage" }, h("button", { class: "btn", onclick: () => { location.hash = "atelier"; } }, "Voir ce qu'il reste à faire")),
-  ));
 }
 
 // ───────────── Questions ─────────────
@@ -2348,7 +1888,7 @@ function sectionCaisse() {
       h("strong", {}, "Prix inconnu (non compté dans les totaux) : "), [...st.manquants_sans_prix, ...en.sans_prix].join(", ")) : null,
     manquants.length ? [h("h3", { class: "sous-titre" }, "Articles manquants"), tableau(manquants, 1)] : h("div", { class: "vide" }, "Aucun article manquant : le stock tombe juste."),
     enTrop.length ? [h("h3", { class: "sous-titre" }, "Articles en trop"),
-      h("p", { class: "note", style: "margin:0 14px" }, "Plus que prévu : souvent fabriqués sans « C'est fait » dans l'Atelier, ou une erreur au comptage d'avant. Pas comptés dans la valeur ci-dessus."),
+      h("p", { class: "note", style: "margin:0 14px" }, "Plus que prévu : souvent produits sans « C'est fait » dans la préparation, ou une erreur au comptage d'avant. Pas comptés dans la valeur ci-dessus."),
       tableau(enTrop, -1)] : null,
     h("p", { class: "note", style: "margin:0;padding:8px 14px 14px;font-size:13px" },
       `Calcul : pour chaque article compté avant (${k.comptes_avant}) et après (${k.comptes_apres}) le salon, attendu = compté avant − vendus + autres mouvements (fabrication, réceptions) ; l'écart avec le compté après est « sans trace ». Ventes en ligne entre le salon et le comptage comprises.`));
@@ -2356,117 +1896,10 @@ function sectionCaisse() {
 const signe1 = (n) => (n > 0 ? "+" + n : String(n));
 
 // ───────────── À acheter ─────────────
-async function pageAchats() {
-  etat.achats = await api("/achats");
-  dessinerAchats();
-}
-
-function texteLots(l) {
-  if (l.tout_le_disponible) return "tout le disponible";
-  if (l.sans_quantite) return "1 pot";
-  return l.lots ? `${l.a_commander} (${l.lots.nombre} lot${l.lots.nombre > 1 ? "s" : ""} de ${l.lots.taille})` : String(l.a_commander);
-}
-
-function dessinerAchats() {
-  const d = etat.achats;
-  entete("À acheter");
-  const page = document.getElementById("page");
-  const act = etat.achatAction;
-  const blocs = [];
-  blocs.push(h("p", { class: "note", style: "margin:0" }, d.preparation
-    ? `Pour la préparation en cours (${d.salons.map((s) => s.nom).join(" + ")}, premier jour le ${fmtDate(d.salons[0].date_debut)}), d'après les étapes de l'Atelier. « À commander avant » = premier jour − délai du fournisseur.`
-    : "Aucune préparation en cours : seuls les pots presque vides et les quantités fixées à la main apparaissent."));
-  if (d.alertes.length) blocs.push(h("div", { class: "question" }, h("strong", {}, "Récup"), d.alertes.map((a) => h("div", {}, a))));
-
-  const ligne = (l) => {
-    const ouvert = act && act.piece_id === l.piece_id ? act : null;
-    let panneau = null;
-    if (ouvert?.type === "commande") {
-      const q = h("input", { class: "compte", type: "number", min: "1", step: "1", value: l.tout_le_disponible || l.sans_quantite ? "" : String(l.a_commander), placeholder: "quantité", "aria-label": "Quantité commandée" });
-      const lot = h("input", { class: "compte", type: "number", min: "1", step: "1", value: l.lots ? String(l.lots.taille) : "", placeholder: "lot ?", "aria-label": "Taille du lot" });
-      panneau = h("div", { class: "ligne-editeur" }, "Commandé :", q, h("span", { class: "note" }, "par lots de"), lot,
-        h("button", { class: "btn", onclick: () => tenter(async () => {
-          if (!l.sans_quantite && q.value === "") throw new Error("Indiquez la quantité commandée (ce que vous avez pu prendre).");
-          await api("/commandes", { method: "POST", body: { piece_id: l.piece_id, quantite: l.sans_quantite ? 1 : Number(q.value), taille_lot: lot.value === "" ? null : Number(lot.value) } });
-          etat.achatAction = null; flash("Noté comme commandé."); await pageAchats();
-        }) }, "Valider"),
-        h("button", { class: "btn-sec", onclick: () => { etat.achatAction = null; dessinerAchats(); } }, "Annuler"));
-    } else if (ouvert?.type === "compter") {
-      const q = h("input", { class: "compte", type: "number", min: "0", step: "1", "aria-label": "Combien en avez-vous ?" });
-      panneau = h("div", { class: "ligne-editeur" }, `Combien de ${l.nom} avez-vous vraiment ?`, q,
-        h("button", { class: "btn", onclick: () => tenter(async () => {
-          if (q.value === "") throw new Error("Indiquez un nombre.");
-          await enregistrerComptage([{ piece_id: l.piece_id, compte: Number(q.value) }]);
-          etat.achatAction = null; await pageAchats();
-        }) }, "Valider"),
-        h("button", { class: "btn-sec", onclick: () => { etat.achatAction = null; dessinerAchats(); } }, "Annuler"));
-    } else if (ouvert?.type === "modifier") {
-      const q = h("input", { class: "compte", type: "number", min: "1", step: "1", value: l.ajuste && !l.sans_quantite ? String(l.a_commander) : "", placeholder: "calcul", "aria-label": "Quantité" });
-      const dt = h("input", { type: "date", value: l.avant_le ?? "", "aria-label": "À commander avant le", style: "min-height:36px;border:1px solid var(--bord-fort);border-radius:8px;padding:0 8px" });
-      panneau = h("div", { class: "ligne-editeur" }, "Quantité", q, "à commander avant le", dt,
-        h("button", { class: "btn", onclick: () => tenter(async () => {
-          await api("/achats/ajustement", { method: "PUT", body: { piece_id: l.piece_id, quantite: q.value === "" ? null : Number(q.value), avant_le: dt.value || null } });
-          etat.achatAction = null; await pageAchats();
-        }) }, "Enregistrer"),
-        l.ajuste ? h("button", { class: "btn-sec", onclick: () => tenter(async () => {
-          await api("/achats/ajustement", { method: "PUT", body: { piece_id: l.piece_id, quantite: null, avant_le: null } });
-          etat.achatAction = null; await pageAchats();
-        }) }, "Revenir au calcul") : null,
-        h("button", { class: "btn-sec", onclick: () => { etat.achatAction = null; dessinerAchats(); } }, "Annuler"));
-    }
-    const ouvrir = (type) => () => { etat.achatAction = { piece_id: l.piece_id, type }; dessinerAchats(); };
-    return [
-      h("tr", {},
-        h("td", {}, h("strong", {}, l.nom), h("div", { class: "note", style: "font-size:12px" }, l.famille)),
-        h("td", { class: "note" }, l.calcul + (l.ajuste ? " · modifié à la main" : "")),
-        h("td", { class: "num qte" }, texteLots(l)),
-        h("td", { class: l.en_retard ? "manque-txt" : "" }, l.avant_le ? (l.en_retard ? "⚠ " : "") + fmtDate(l.avant_le) : h("span", { class: "note" }, l.delai_inconnu ? "délai inconnu" : "—")),
-        h("td", {}, h("div", { class: "actions-ligne" },
-          h("button", { class: "btn-petit", disabled: !!act, onclick: ouvrir("commande") }, "Commandé"),
-          l.sans_quantite ? null : h("button", { class: "btn-petit", disabled: !!act, onclick: ouvrir("compter") }, "J'en ai déjà"),
-          h("button", { class: "btn-petit", disabled: !!act, onclick: ouvrir("modifier") }, "Modifier")))),
-      panneau ? h("tr", {}, h("td", { colspan: "5", style: "background:#FBF8F2" }, panneau)) : null,
-    ];
-  };
-
-  blocs.push(h("section", { class: "carte" }, h("h2", {}, "À commander"),
-    d.lignes.length ? h("table", { class: "tbl" },
-      h("thead", {}, h("tr", {}, ["Fourniture", "Calcul", "À commander", "Avant le", ""].map((t, i) => h("th", { class: i === 2 ? "num" : null }, t)))),
-      h("tbody", {}, d.lignes.flatMap(ligne))) : h("div", { class: "vide" }, "Rien à commander pour l'instant.")));
-
-  blocs.push(h("section", { class: "carte" }, h("h2", {}, "Commandé, en attente"),
-    d.commandes.length ? h("table", { class: "tbl" }, h("tbody", {}, d.commandes.flatMap((cmd) => {
-      const ouvert = act && act.commande_id === cmd.id;
-      const q = h("input", { class: "compte", type: "number", min: "0", step: "1", value: String(cmd.quantite), "aria-label": "Quantité reçue" });
-      const lot = h("input", { class: "compte", type: "number", min: "1", step: "1", value: cmd.taille_lot ?? "", placeholder: "lot ?", "aria-label": "Taille du lot reçu" });
-      return [
-        h("tr", {},
-          h("td", { style: "font-weight:600" }, cmd.nom),
-          h("td", { class: "num" }, cmd.suivi === "quantite" ? cmd.quantite + (cmd.taille_lot ? ` (lots de ${cmd.taille_lot})` : "") : "1 pot"),
-          h("td", { class: "note" }, "commandé le " + fmtDate(cmd.commande_le.slice(0, 10))),
-          h("td", {}, h("div", { class: "actions-ligne" },
-            h("button", { class: "btn-petit", disabled: !!act, onclick: () => { etat.achatAction = { commande_id: cmd.id }; dessinerAchats(); } }, "Reçu…"),
-            h("button", { class: "btn-petit", disabled: !!act, onclick: () => tenter(async () => {
-              if (!confirm(`Annuler la commande de ${cmd.nom} ?`)) return;
-              await api("/commandes/" + cmd.id, { method: "DELETE" }); await pageAchats();
-            }) }, "Annuler")))),
-        ouvert ? h("tr", {}, h("td", { colspan: "4", style: "background:#FBF8F2" }, h("div", { class: "ligne-editeur" },
-          cmd.suivi === "quantite" ? ["Reçu :", q, h("span", { class: "note" }, "taille du lot"), lot] : "Pot reçu.",
-          h("button", { class: "btn", onclick: () => tenter(async () => {
-            await api(`/commandes/${cmd.id}/recu`, { method: "POST", body: cmd.suivi === "quantite" ? { quantite: Number(q.value), taille_lot: lot.value === "" ? null : Number(lot.value) } : {} });
-            etat.achatAction = null; flash("Reçu : entré en stock."); await pageAchats();
-          }) }, "Valider"),
-          h("button", { class: "btn-sec", onclick: () => { etat.achatAction = null; dessinerAchats(); } }, "Annuler")))) : null,
-      ];
-    }))) : h("div", { class: "vide" }, "Aucune commande en attente.")));
-
-  page.replaceChildren(h("div", { style: "display:flex;flex-direction:column;gap:18px" }, ...blocs));
-}
-
 // Réglages d'achat d'une fourniture (délai, mode, lots).
 async function ouvrirReglageAchat(p) {
   const r = await api(`/pieces/${p.id}/achat`);
-  etat.achatEdition = { id: p.id, delai: r.delai_jours ?? "", mode: r.mode_achat ?? "quantite", lots: r.lots.join(", ") };
+  etat.achatEdition = { id: p.id, delai: r.delai_jours ?? "", mode: r.mode_achat ?? "quantite", lots: r.lots.join(", "), seuil: r.seuil ?? "" };
   dessinerReglages();
 }
 
@@ -2479,10 +1912,11 @@ function editeurAchat(p) {
       [["quantite", "à la quantité"], ["tout_le_disponible", "tout le disponible (stock fournisseur limité)"], ["jamais", "jamais (récup)"]]
         .map(([k, v]) => h("option", { value: k, selected: e.mode === k }, v)))),
     h("label", {}, "Tailles de lot (ex. 30, 80, 160)", h("input", { value: e.lots, placeholder: "inconnues", oninput: (ev) => { e.lots = ev.target.value; } })),
+    h("label", {}, "Alerte sous (vide : pas d'alerte)", h("input", { type: "number", min: "0", step: "1", value: String(e.seuil), style: "width:120px", oninput: (ev) => { e.seuil = ev.target.value; } })),
     h("button", { class: "btn", onclick: () => tenter(async () => {
       const lots = e.lots.split(/[,;\s]+/).filter(Boolean).map(Number);
       if (lots.some((t) => !Number.isInteger(t) || t < 1)) throw new Error("Tailles de lot : des nombres entiers séparés par des virgules.");
-      await api(`/pieces/${p.id}/achat`, { method: "PUT", body: { delai_jours: e.delai === "" ? null : Number(e.delai), mode_achat: e.mode, lots } });
+      await api(`/pieces/${p.id}/achat`, { method: "PUT", body: { delai_jours: e.delai === "" ? null : Number(e.delai), mode_achat: e.mode, lots, seuil: e.seuil === "" ? null : Number(e.seuil) } });
       etat.achatEdition = null; flash("Réglages d'achat enregistrés."); await pageReglages();
     }) }, "Enregistrer"),
     h("button", { class: "btn-sec", onclick: () => { etat.achatEdition = null; dessinerReglages(); } }, "Annuler"))));
@@ -2509,7 +1943,8 @@ function dessinerAccueil() {
   const page = document.getElementById("page");
   if (!d.preparation) {
     page.replaceChildren(h("div", { class: "carte" }, h("div", { class: "vide" },
-      "Aucun salon à venir. Ajoutez le prochain dans ", h("a", { href: "#salons" }, "Salons"), " : le rétro-planning apparaîtra ici.")));
+      "Aucun salon à venir. Ajoutez le prochain dans ", h("a", { href: "#salons" }, "Salons"), " : le rétro-planning apparaîtra ici.")),
+      d.sous_seuil?.length ? h("div", { class: "tuiles" }, tuileSeuil(d.sous_seuil)) : null);
     return;
   }
   const premier = d.salons[0];
@@ -2679,10 +2114,11 @@ function dessinerAccueil() {
   }); } }, nomNouveau, dateNouveau, h("button", { class: "btn-sec" }, "+ Ajouter un jalon"));
 
   const tuile = (titre, valeur, sous, lien) => h("a", { class: "tuile tuile-lien", href: lien }, h("span", { class: "note" }, titre), h("strong", {}, valeur), h("span", { class: "note", style: "font-size:13px" }, sous));
-  const f = d.fabrication;
+  const f = d.production, fo = d.fournitures;
   const tuiles = h("div", { class: "tuiles" },
-    tuile("Atelier", f.articles_manquants ? `${f.articles_manquants} article(s)` : "rien à faire", f.etapes ? `${f.etapes} étape(s) · ≈ ${dureeTexte(f.travail_min)}` : "tout est prêt", "#atelier"),
-    tuile("À acheter", d.achats ? `${d.achats} ligne(s)` : "rien", "commandes de la préparation", "#achats"),
+    tuile("À produire", f.a_produire ? String(f.a_produire) : "rien", f.lignes ? `${f.faites} / ${f.lignes} fait${f.faites > 1 ? "s" : ""}` : "décidez dans Préparation", "#preparation"),
+    tuile("Fournitures", fo.a_verifier ? `${fo.a_verifier} à vérifier` : fo.a_commander ? `${fo.a_commander} à commander` : "rien en attente", fo.total ? `${fo.total} pour cette préparation` : "—", "#preparation"),
+    tuileSeuil(d.sous_seuil),
     tuile("Questions", String(d.questions), "noms de caisse, ventes impossibles…", "#questions"));
 
   const liste = h("ol", { class: "liste-jalons" }, [...d.jalons].sort((a, b) => a.date.localeCompare(b.date)).map((j) =>
@@ -2702,9 +2138,16 @@ function dessinerAccueil() {
     tuiles));
 }
 
+// Fournitures sous leur seuil d'alerte (réglage « Achat » de la fourniture), même hors préparation.
+function tuileSeuil(liste) {
+  if (!liste || !liste.length) return null;
+  return h("a", { class: "tuile tuile-lien", href: "#stock" }, h("span", { class: "note" }, "Sous le seuil d'alerte"), h("strong", {}, `${liste.length} fourniture${liste.length > 1 ? "s" : ""}`),
+    h("span", { class: "note", style: "font-size:13px" }, liste.map((x) => `${x.nom} (${x.stock})`).join(", ") + " : à vérifier"));
+}
+
 function lienJalon(type) {
-  const liens = { objectifs: ["#objectifs/" + etat.accueil.preparation.id, "Ouvrir les objectifs"], commandes: ["#achats", "Ouvrir À acheter"],
-    fabrication_debut: ["#atelier", "Ouvrir l'Atelier"], fabrication_fin: ["#atelier", "Ouvrir l'Atelier"],
+  const liens = { objectifs: ["#preparation", "Ouvrir la préparation"], commandes: ["#preparation", "Ouvrir la préparation"],
+    fabrication_debut: ["#preparation", "Ouvrir la préparation"], fabrication_fin: ["#preparation", "Ouvrir la préparation"],
     comptage: ["#stock/avant/" + etat.accueil.preparation.id, "Faire le comptage avant"], bilan: ["#bilan/" + etat.accueil.salons[0].id, "Ouvrir le bilan"] };
   const l = liens[type];
   return l ? h("a", { href: l[0], class: "btn-petit", style: "display:inline-flex;align-items:center;text-decoration:none" }, l[1]) : null;

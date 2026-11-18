@@ -1,14 +1,13 @@
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { Env, NIVEAUX, SUIVIS, STOCK_SQL, erreur, texte, entier, choix, corps, lireLignesComptage, lirePieces, instructionsComptage } from "./outils";
-import { recettes } from "./recettes";
 import { salons, debutPreparation } from "./salons";
-import { atelier } from "./atelier";
+import { preparation } from "./preparation";
 import { questions } from "./questions";
 import { bilan, familleThermometre } from "./bilan";
 import { achats } from "./achats";
 import { accueil } from "./accueil";
-import { fiches, materialiser, detacherEtapes } from "./fiches";
+import { fiches } from "./fiches";
 import { importer } from "./sumup";
 import { controlerAcces } from "./acces";
 // @ts-expect-error : importé comme texte (règle « Text » de wrangler.jsonc)
@@ -106,7 +105,6 @@ app.patch("/pieces/:id", async (c) => {
     if (String(e).includes("FOREIGN KEY")) erreur("Famille introuvable.", 404);
     throw e;
   }
-  if (b.retire !== undefined || b.niveau !== undefined || b.famille_id !== undefined) await materialiser(c.env.DB);
   return c.json({ ok: true });
 });
 
@@ -141,7 +139,6 @@ app.post("/produits", async (c) => {
   const res = await db.batch(variantes.map((v) =>
     db.prepare("INSERT INTO piece (nom, famille_id, niveau, suivi, produit_id, variante) VALUES (?, ?, ?, ?, ?, ?) RETURNING id")
       .bind(`${nom} ${v}`, famille_id, niveau, suivi, pr!.id, v)));
-  await materialiser(db);
   return c.json({ id: pr!.id, pieces: res.map((r, i) => ({ id: (r.results[0] as { id: number }).id, variante: variantes[i] })) }, 201);
 });
 
@@ -160,7 +157,6 @@ app.post("/produits/:id/variantes", async (c) => {
     "INSERT INTO piece (nom, famille_id, niveau, suivi, produit_id, variante) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (famille_id, nom) DO NOTHING RETURNING id",
   ).bind(`${pr.nom} ${variante}`, pr.famille_id, niveau, pr.suivi ?? "quantite", id, variante).first<{ id: number }>();
   if (!r) erreur(`« ${pr.nom} ${variante} » existe déjà.`, 409);
-  await materialiser(db);
   return c.json({ id: r.id }, 201);
 });
 
@@ -179,22 +175,22 @@ app.patch("/produits/:id", async (c) => {
     if (String(e).includes("UNIQUE")) erreur("Ce nom existe déjà dans cette famille.", 409);
     throw e;
   }
-  await materialiser(db);
   return c.json({ ok: true });
 });
 
 // ───────────── Supprimer / retirer ─────────────
 // Jamais vendu : vraiment supprimé (comptages et réserves compris : ça peut être une erreur de saisie).
 // Déjà vendu : retiré (absent du stock, du comptage et des calculs ; les ventes restent dans les bilans).
-// Dans les deux cas, il est enlevé des étapes où il apparaît (l'écran prévient avant).
+// Dans les deux cas, il est enlevé des recettes où il apparaît (l'écran prévient avant).
 async function etatSuppression(db: D1Database, id: number) {
   const [pR, vR, eR] = await db.batch([
     db.prepare("SELECT id, nom, produit_id FROM piece WHERE id = ?").bind(id),
     db.prepare("SELECT EXISTS (SELECT 1 FROM mouvement WHERE piece_id = ? AND motif IN ('vente', 'vente_especes')) AS vendu").bind(id),
     db.prepare(
-      `SELECT DISTINCT e.nom FROM etape e WHERE (e.pour_piece_id IS NULL OR e.pour_piece_id <> ?1) AND e.id IN (
-         SELECT etape_id FROM etape_utilise WHERE piece_id = ?1 UNION SELECT etape_id FROM etape_donne WHERE piece_id = ?1
-         UNION SELECT d.etape_id FROM etape_choix c JOIN etape_donne d ON d.id = c.etape_donne_id WHERE c.piece_id = ?1) ORDER BY e.nom`,
+      `SELECT DISTINCT COALESCE(p.nom, pr.nom, f.nom || ' ' || r.variante) AS nom FROM recette_element e JOIN recette r ON r.id = e.recette_id
+       LEFT JOIN piece p ON p.id = r.piece_id LEFT JOIN produit pr ON pr.id = r.produit_id LEFT JOIN famille f ON f.id = r.famille_id
+       WHERE e.piece_id = ?1 OR e.produit_id = (SELECT produit_id FROM piece WHERE id = ?1 AND
+         NOT EXISTS (SELECT 1 FROM piece x WHERE x.produit_id = piece.produit_id AND x.id <> ?1)) ORDER BY 1`,
     ).bind(id),
   ]);
   const p = pR.results[0] as { id: number; nom: string; produit_id: number | null } | undefined;
@@ -211,42 +207,45 @@ app.delete("/pieces/:id", async (c) => {
   const id = entier(c.req.param("id"), "id", 1);
   const db = c.env.DB;
   const e = await etatSuppression(db, id);
-  // Recettes : lignes qui le citent, et étapes de sa propre recette (article simple).
-  await detacherEtapes(db, "pour_piece_id = ? AND recette_etape_id IS NOT NULL", [id]);
-  const horsEtapes = [
-    db.prepare("DELETE FROM recette_ligne WHERE piece_id = ?").bind(id),
+  const horsRecettes = [
+    db.prepare("DELETE FROM recette_element WHERE piece_id = ? OR recette_id IN (SELECT id FROM recette WHERE piece_id = ?)").bind(id, id),
+    db.prepare("DELETE FROM recette WHERE piece_id = ?").bind(id),
+    // Anciennes tables (étapes, avant le 18/11/2026) : seulement pour ne pas bloquer la suppression.
+    db.prepare("DELETE FROM recette_ligne WHERE piece_id = ? OR recette_etape_id IN (SELECT id FROM recette_etape WHERE piece_id = ?)").bind(id, id),
     db.prepare("DELETE FROM recette_format WHERE recette_etape_id IN (SELECT id FROM recette_etape WHERE piece_id = ?)").bind(id),
-    db.prepare("DELETE FROM recette_ligne WHERE recette_etape_id IN (SELECT id FROM recette_etape WHERE piece_id = ?)").bind(id),
+    db.prepare("UPDATE etape SET recette_etape_id = NULL WHERE recette_etape_id IN (SELECT id FROM recette_etape WHERE piece_id = ?)").bind(id),
     db.prepare("DELETE FROM recette_etape WHERE piece_id = ?").bind(id),
     db.prepare("DELETE FROM etape_utilise WHERE piece_id = ?").bind(id),
     db.prepare("DELETE FROM etape_choix WHERE piece_id = ?").bind(id),
     db.prepare("DELETE FROM etape_donne WHERE piece_id = ?").bind(id),
+    db.prepare("DELETE FROM prep_production WHERE piece_id = ?").bind(id),
+    db.prepare("DELETE FROM prep_verif WHERE piece_id = ?").bind(id),
   ];
   if (e.vendu) {
     await db.batch([
-      ...horsEtapes,
+      ...horsRecettes,
       db.prepare("DELETE FROM objectif WHERE piece_id = ? AND salon_id IN (SELECT id FROM salon WHERE date_debut >= date('now'))").bind(id),
       db.prepare("UPDATE piece SET retire = 1 WHERE id = ?").bind(id),
     ]);
-    await materialiser(db);
     return c.json({ action: "retire", etapes: e.etapes });
   }
   await db.batch([
-    ...horsEtapes,
-    ...["mouvement", "comptage_ligne", "objectif", "bilan_article", "correspondance_piece", "question", "commande", "achat_ajustement", "piece_lot"]
+    ...horsRecettes,
+    ...["mouvement", "comptage_ligne", "objectif", "bilan_article", "correspondance_piece", "question", "commande", "achat_ajustement", "piece_lot", "prep_fait"]
       .map((t) => db.prepare(`DELETE FROM ${t} WHERE piece_id = ?`).bind(id)),
     db.prepare("DELETE FROM piece WHERE id = ?").bind(id),
   ]);
   // Produit sans plus aucune variante : on retire aussi ses recettes et le produit.
   if (e.produit_id && !(await db.prepare("SELECT 1 FROM piece WHERE produit_id = ?").bind(e.produit_id).first())) {
-    await detacherEtapes(db, "recette_etape_id IN (SELECT id FROM recette_etape WHERE produit_id = ?)", [e.produit_id]);
     await db.batch([
+      db.prepare("DELETE FROM recette_element WHERE produit_id = ? OR recette_id IN (SELECT id FROM recette WHERE produit_id = ?)").bind(e.produit_id, e.produit_id),
+      db.prepare("DELETE FROM recette WHERE produit_id = ?").bind(e.produit_id),
       db.prepare("DELETE FROM recette_ligne WHERE produit_id = ? OR recette_etape_id IN (SELECT id FROM recette_etape WHERE produit_id = ?)").bind(e.produit_id, e.produit_id),
+      db.prepare("UPDATE etape SET recette_etape_id = NULL WHERE recette_etape_id IN (SELECT id FROM recette_etape WHERE produit_id = ?)").bind(e.produit_id),
       db.prepare("DELETE FROM recette_etape WHERE produit_id = ?").bind(e.produit_id),
       db.prepare("DELETE FROM produit WHERE id = ?").bind(e.produit_id),
     ]);
   }
-  await materialiser(db);
   return c.json({ action: "supprime", etapes: e.etapes });
 });
 
@@ -361,9 +360,8 @@ app.put("/reglages", async (c) => {
   return c.json({ ok: true });
 });
 
-app.route("/", recettes);
 app.route("/", salons);
-app.route("/", atelier);
+app.route("/", preparation);
 app.route("/", questions);
 app.route("/", bilan);
 app.route("/", achats);
