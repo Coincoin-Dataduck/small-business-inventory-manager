@@ -1,6 +1,5 @@
 -- Recettes « ce qu'il faut pour en faire » (décision du 18/11/2026), d'après la spec §6 et les réponses de Clément.
 -- Appliqué une fois en prod, après la migration 0008. Identifiants = ceux de la base de prod au 18/11/2026.
-PRAGMA defer_foreign_keys = true;
 
 -- Anciennes étapes (aucune n'a jamais été marquée « faite ») : vidées.
 DELETE FROM etape_choix; DELETE FROM etape_utilise; DELETE FROM etape_donne; DELETE FROM etape;
@@ -72,7 +71,6 @@ FROM recette r JOIN json_each('[
   ["fA5", null, 13, 1],
   ["r22", null, 21, 1],
   ["r22", null, 23, 1],
-  ["r22", -1, null, 1],
   ["r22", 61, null, 1],
   ["r22", 43, null, 1],
   ["r21", 81, null, 1],
@@ -97,8 +95,9 @@ FROM recette r JOIN json_each('[
   WHEN r.piece_id = (SELECT id FROM piece WHERE nom = 'Lampe' AND famille_id = 4) THEN 'lampe'
   ELSE 'p' || r.piece_id END;
 -- [clé de la recette, fourniture, produit « même variante », quantité]
--- La lampe dans le kit (cle -1 ci-dessus = la Lampe créée plus haut).
-UPDATE recette_element SET piece_id = (SELECT id FROM piece WHERE nom = 'Lampe' AND famille_id = 4) WHERE piece_id = -1;
+-- La lampe dans le kit (la Lampe créée plus haut).
+INSERT INTO recette_element (recette_id, piece_id, quantite)
+SELECT id, (SELECT id FROM piece WHERE nom = 'Lampe' AND famille_id = 4), 1 FROM recette WHERE produit_id = 22;
 
 -- Salons passés (docs/historique-salons.md), pour que le conseil s'appuie sur tout l'historique et pas seulement Art2Play.
 -- Les ventes carte s'y rattachent par la date ; rien ne change dans le stock.
