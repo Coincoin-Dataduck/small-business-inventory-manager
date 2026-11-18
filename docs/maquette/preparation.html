@@ -1,0 +1,363 @@
+<title>Préparation Lucca + Café dessin</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Alfa+Slab+One&family=Libre+Franklin:wght@400;500;600;700&display=swap">
+<style>
+/* Mise en page : une colonne d'atelier, la frise des 4 temps en tête, chaque temps une planche. Tokens repris de l'app (linogravure). */
+:root {
+  --fond: #F2F2EE; --carte: #FFFFFF; --doux-fond: #F7F7F4; --encre: #1D2422; --doux: #5D6461;
+  --bord: #C9CBC4; --bord-fin: #E4E5E0; --beige: #EFE3D5;
+  --vert: #127A68; --vert-texte: #0E6556; --vermillon: #F03C1E; --bois: #7E5235;
+  --alerte: #B0240A; --alerte-fond: #FFD8CC; --ok-fond: #DCEFEA; --attention: #8A5A00; --attention-fond: #FBEBC8;
+  --f-titre: 'Alfa Slab One', Rockwell, Georgia, serif; --f-texte: 'Libre Franklin', system-ui, sans-serif;
+}
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) {
+  --fond: #161B1A; --carte: #1F2624; --doux-fond: #1B2120; --encre: #E8EAE6; --doux: #A3AAA6;
+  --bord: #3A4341; --bord-fin: #2B3331; --beige: #3A3027;
+  --vert: #3FB39C; --vert-texte: #6CCDB8; --vermillon: #FF6A4D; --bois: #C8946C;
+  --alerte: #FF9B85; --alerte-fond: #4A211A; --ok-fond: #183A33; --attention: #F2C46B; --attention-fond: #3D3118; color-scheme: dark } }
+:root[data-theme="dark"] {
+  --fond: #161B1A; --carte: #1F2624; --doux-fond: #1B2120; --encre: #E8EAE6; --doux: #A3AAA6;
+  --bord: #3A4341; --bord-fin: #2B3331; --beige: #3A3027;
+  --vert: #3FB39C; --vert-texte: #6CCDB8; --vermillon: #FF6A4D; --bois: #C8946C;
+  --alerte: #FF9B85; --alerte-fond: #4A211A; --ok-fond: #183A33; --attention: #F2C46B; --attention-fond: #3D3118; color-scheme: dark }
+* { box-sizing: border-box; }
+body { background: var(--fond); color: var(--encre); font-family: var(--f-texte); font-size: 15px; line-height: 1.45; }
+.page { max-width: 1100px; margin: 0 auto; padding-block: 24px 64px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); display: flex; flex-direction: column; gap: 22px; }
+h1, h2 { font-family: var(--f-titre); font-weight: 400; margin: 0; text-wrap: balance; }
+h1 { font-size: 30px; }
+h2 { font-size: 22px; }
+.maquette { background: var(--attention-fond); color: var(--attention); border-radius: 10px; padding: 10px 14px; font-size: 14px; }
+.sous { color: var(--doux); margin: 4px 0 0; }
+.frise { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0; position: relative; }
+.frise a { display: flex; flex-direction: column; gap: 4px; padding: 10px 8px 0; text-decoration: none; color: var(--encre); border-top: 4px solid var(--vert); position: relative; }
+.frise a::before { content: ""; position: absolute; top: -11px; left: 8px; width: 14px; height: 14px; border-radius: 50%; background: var(--carte); border: 4px solid var(--vert); }
+.frise a.fait::before { background: var(--vert); }
+.frise b { font-size: 14px; }
+.frise span { font-size: 12px; color: var(--doux); }
+.planche { background: var(--carte); border: 1px solid var(--bord); border-radius: 14px; padding: 18px; display: flex; flex-direction: column; gap: 14px; min-width: 0; }
+.tete { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+.tete .num { font-family: var(--f-titre); color: var(--vermillon); font-size: 22px; }
+.regle { font-size: 13px; color: var(--doux); background: var(--doux-fond); border-left: 3px solid var(--bois); padding: 8px 12px; }
+.defile { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 14px; }
+th { text-align: left; font-size: 11px; font-weight: 600; color: var(--doux); text-transform: uppercase; letter-spacing: .06em; padding: 8px 10px; border-bottom: 1px solid var(--bord); white-space: nowrap; }
+td { padding: 8px 10px; border-bottom: 1px solid var(--bord-fin); vertical-align: middle; }
+tr.famille td { background: var(--doux-fond); font-weight: 700; font-size: 13px; letter-spacing: .02em; }
+.n { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.calc { font-size: 12px; color: var(--doux); }
+input.q { width: 64px; min-height: 34px; border: 1px solid var(--encre); border-radius: 8px; padding: 0 8px; background: var(--carte); color: var(--encre); font: inherit; font-weight: 700; text-align: right; }
+input.q:focus-visible, button:focus-visible { outline: 3px solid var(--vermillon); outline-offset: 2px; }
+.pill { display: inline-block; font-size: 12px; font-weight: 600; padding: 2px 9px; border-radius: 999px; white-space: nowrap; }
+.p-rupture { background: var(--alerte-fond); color: var(--alerte); }
+.p-manque { background: var(--alerte-fond); color: var(--alerte); }
+.p-bas { background: var(--attention-fond); color: var(--attention); }
+.p-inconnu { background: var(--beige); color: var(--encre); }
+.p-ok { background: var(--ok-fond); color: var(--vert-texte); }
+.p-sans { border: 1px dashed var(--bord); color: var(--doux); }
+.btn { min-height: 44px; padding: 0 18px; border: 0; border-radius: 10px; background: var(--encre); color: var(--fond); font: inherit; font-weight: 700; cursor: pointer; }
+.btn:disabled { opacity: .45; cursor: default; }
+.btn-p { min-height: 34px; padding: 0 12px; border: 1px solid var(--encre); border-radius: 8px; background: transparent; color: var(--encre); font: inherit; font-size: 13px; cursor: pointer; white-space: nowrap; }
+.btn-p[aria-pressed="true"] { background: var(--vert); border-color: var(--vert); color: var(--carte); }
+.resume { display: flex; gap: 10px 22px; flex-wrap: wrap; font-size: 14px; }
+.resume b { font-variant-numeric: tabular-nums; }
+.pied { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.etat { font-size: 14px; color: var(--doux); }
+.commande { background: var(--ok-fond); border-radius: 10px; padding: 12px 14px; font-size: 14px; }
+.commande ul { margin: 6px 0 0; padding-left: 18px; }
+details summary { cursor: pointer; color: var(--doux); font-size: 13px; padding: 8px 10px; }
+.ligne-faite td { color: var(--doux); }
+.ligne-faite td:first-child { text-decoration: line-through; }
+.question { font-size: 13px; color: var(--attention); }
+@media (max-width: 640px) { .frise { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 18px; } .cache-tel { display: none; } }
+</style>
+
+<div class="page">
+  <div class="maquette">Maquette à valider. Les stocks et les ventes sont les vrais chiffres de l'outil (18/11). Rien n'est enregistré : tu peux taper, cocher, essayer.</div>
+
+  <header>
+    <h1>Préparation Lucca + Café dessin</h1>
+    <p class="sous">Marché de Noël de Lucca (3 déc.) · Marché de Noël de Café dessin (12–13 déc.) · la préparation commence 15 jours avant, le 18 nov.</p>
+  </header>
+
+  <nav class="frise" aria-label="Les quatre temps de la préparation">
+    <a href="#produire" id="f1"><b>1. Quoi produire</b><span>vous décidez</span></a>
+    <a href="#verifier" id="f2"><b>2. Fournitures à vérifier</b><span>puis commander</span></a>
+    <a href="#checklist" id="f3"><b>3. Ce qu'on a produit</b><span>checklist</span></a>
+    <a href="#compter" id="f4"><b>4. Compter avant de partir</b><span>avant le 3 déc.</span></a>
+  </nav>
+
+  <!-- 1 -->
+  <section class="planche" id="produire">
+    <div class="tete"><span class="num">1</span><h2>Quoi produire</h2></div>
+    <p class="regle"><b>Conseil (proposition à valider)</b> · Articles : ce que l'article a vendu à son meilleur salon, + 30 % de marge, moins le stock. · Tampons : la caisse ne dit pas le motif, donc on remonte au niveau des autres motifs (médiane 10) ceux qui en ont 5 ou moins. Le champ est prérempli avec le conseil : c'est vous qui tapez le nombre à produire.</p>
+    <div class="defile"><table id="t-produire">
+      <thead><tr><th>Article</th><th class="n">Stock</th><th class="n cache-tel">Art2Play</th><th class="n cache-tel">Meilleur salon</th><th>Conseil</th><th class="n">À produire</th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="resume" id="resume-produire"></div>
+  </section>
+
+  <!-- 2 -->
+  <section class="planche" id="verifier">
+    <div class="tete"><span class="num">2</span><h2>Fournitures à vérifier</h2></div>
+    <p class="regle">Ce qu'il faut pour produire la liste du 1, comparé à ce qui devrait rester d'après l'outil. Les fournitures maison (planchettes, bandes de buvard…) en stock sont utilisées d'abord. Vérifie chaque ligne, même celles qui semblent bonnes : tape ce que tu as vraiment, ou « OK » si le chiffre est juste.</p>
+    <div class="defile"><table id="t-verifier">
+      <thead><tr><th>Fourniture</th><th class="n">Il en faut</th><th class="n">Devrait rester</th><th>État</th><th class="n">J'en ai</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+    <div class="pied"><span class="etat" id="etat-verif"></span><button class="btn" id="pret" disabled>Tout est vérifié, on passe les commandes</button></div>
+    <div class="commande" id="commande" hidden></div>
+  </section>
+
+  <!-- 3 -->
+  <section class="planche" id="checklist">
+    <div class="tete"><span class="num">3</span><h2>Ce qu'on a produit</h2></div>
+    <p class="regle">Au fil de la préparation. Indiquer ce qui a été produit l'ajoute au stock et retire les fournitures utilisées (calcul théorique, recalé au comptage). On commence par les fournitures maison : le surplus reste en réserve et sera utilisé la prochaine fois.</p>
+    <div class="defile"><table id="t-checklist">
+      <thead><tr><th>À produire</th><th class="n">Prévu</th><th class="calc cache-tel">Détail</th><th class="n">Produit</th><th></th></tr></thead>
+      <tbody></tbody>
+    </table></div>
+  </section>
+
+  <!-- 4 -->
+  <section class="planche" id="compter">
+    <div class="tete"><span class="num">4</span><h2>Compter avant de partir</h2></div>
+    <p class="regle">Le comptage d'avant salon existe déjà (page Compter), sans changement. Il recale le stock des articles avant le 3 déc. Pas de comptage au retour.</p>
+  </section>
+</div>
+
+<script>
+// ───── Données réelles (prod, 18/11/2026) ─────
+// [famille, nom, stock, ventes Art2Play, ventes meilleur salon (nom)]
+const ARTICLES = [
+  ["Mini-presses","Mini-presse Sauge",0,8,[8,"mai"],{presse:"Sauge"}],
+  ["Mini-presses","Mini-presse Grenouille",0,3,[10,"mai"],{presse:"Grenouille"}],
+  ["Mini-presses","Mini-presse Baba Yaga",0,0,[1,"Lucas 2025"],{presse:"Baba Yaga"}],
+  ["Mini-presses","Mini-presse Crâne",4,2,[3,"mai"],{presse:"Crâne"}],
+  ["Mini-presses","Mini-presse Timbre",11,3,[4,"mai"],{presse:"Timbre"}],
+  ["Mini-presses","Carnet",26,4,[11,"mai"],{carnet:1}],
+  ["Kits","Kit Maison",5,1,[6,"mai"],{kit:"Maison"}],
+  ["Kits","Kit Serre",5,2,[4,"mai"],{kit:"Serre"}],
+  ["Scarabées","Scarabée",5,1,[6,"mai"],{scarabee:1}],
+  ["Pins","Canard de poche",32,1,[13,"mai"],{canard:1}],
+  ["Prints","Piou plouf A5",4,0,[8,"mai"],{print:"A5"}],
+  ["Prints","Piou plouf A4",3,0,[4,"mai"],{print:"A4"}],
+  ["Prints","L’ombre A5",3,0,[4,"mai"],{print:"A5"}],
+  ["Prints","Sieste dans les paquerettes A5",5,0,[4,"mai"],{print:"A5"}],
+  ["Prints","Le trombéron A3",0,1,[1,"Art2Play"],{print:"A3"}],
+  ["Prints","L’ombre A3",0,1,[1,"Art2Play"],{print:"A3"}],
+  ["Prints","La salamandre A4",4,0,[3,"mai"],{print:"A4"}],
+  ["Prints","Les Corgis fantômes A5",3,0,[2,"mai"],{print:"A5"}],
+  ["Prints","M. Citrouille A5",3,0,[2,"mai"],{print:"A5"}],
+];
+const PRINTS_AUTRES = "22 autres prints : 1 à 9 en stock, 0 ou 1 vendu, rien de conseillé.";
+const TAMPONS = [["Canard « … »",1],["Grenouille cœur",1],["Yeux whoa",1],["Arrière teckel",3],["Miaou",4],["Arrière chat noir",5],["Grenouille magicienne sommeil",5],
+  ["Bulle cœur",6],["Arrière chat blanc",6],["Yeux AHHHH",7],["Tête chat noir",8],["Patte",9],["Tête chat blanc",9],["yeux Mmh",9],["Wouf",11],["Arrière corgi",11],["Grenouille café",11],["Tête teckel",11],["Yeux ronds",11],["Canard blasé",13],["Corps noir",13],["Tête corgi",14],["Canard-cœur",14],["Grenouille qui tire la langue",15],["Corps blanc",18],["Grenouille magicienne",18],["Coin",19],["Honk",24]];
+const MEDIANE_TAMPONS = 10;
+const PEINTURE = { "Sauge":"vert foncé", "Grenouille":"vert clair", "Baba Yaga":"orange", "Crâne":"noire", "Timbre":"bleue" };
+
+// Fournitures achetées / récup : stock théorique (null = jamais compté), lots, seuil d'alerte (exemple)
+const F = {
+  mdf:{nom:"Plaque MDF A3",stock:50,seuil:10}, buvard:{nom:"Feuille de buvard Canson",stock:null,lots:[12]}, carton_r:{nom:"Planche de carton (récup)",stock:null,recup:true},
+  elastique:{nom:"Élastique",stock:50}, emb_presse:{nom:"Emballage presse",stock:null}, gomme:{nom:"Feuille de gomme A4",sans:true}, cube:{nom:"Cube en bois",stock:null,lots:[90]},
+  contre:{nom:"Contreplaqué A3",stock:25,lots:[30,80,160],seuil:10}, kraft:{nom:"Feuille kraft A4",stock:null}, a3poch:{nom:"Feuille A3 pour pochette",stock:null},
+  boitier:{nom:"Boîtier de pile",stock:null,lots:[10]}, pile:{nom:"Pile CR2032",stock:null}, led:{nom:"Mini LED",stock:null,lots:[10]}, stickers:{nom:"Feuille de stickers à imprimer",stock:null},
+  a4print:{nom:"Papier print A4 (cerclages)",stock:null}, printA3:{nom:"Feuille print A3",stock:null},
+  cartonA3:{nom:"Carton A3",stock:null}, cartonA4:{nom:"Carton A4",stock:null}, cartonA5:{nom:"Carton A5",stock:null},
+  pochA3:{nom:"Pochette A3",stock:null}, pochA4:{nom:"Pochette A4",stock:null}, pochA5:{nom:"Pochette A5",stock:null},
+  attache:{nom:"Attache",stock:null}, fcartonnette:{nom:"Feuille pour cartonnettes",stock:null}, pochplast:{nom:"Pochette plastique",stock:null}, carnetv:{nom:"Carnet vierge",stock:null},
+};
+for (const c of new Set([...Object.values(PEINTURE),"blanche","vert brillant"])) F["peint_"+c] = { nom:"Peinture "+c, sans:true };
+// Fournitures maison : stock actuel (tous à 0 aujourd'hui), rendement « 1 matière → N »
+const M = {};
+for (const m of Object.keys(PEINTURE)) M["planchette_"+m] = { nom:"Planchette "+m, stock:0, de:[["mdf",1],["peint_"+PEINTURE[m],0]], rend:25, unite:"plaque" };
+Object.assign(M, {
+  bande:{nom:"Bande de buvard",stock:0,de:[["buvard",1]],rend:3,unite:"feuille"},
+  cartonp:{nom:"Carton de presse",stock:0,de:[["carton_r",1]],rend:2,unite:"planche"},
+  jeuMaison:{nom:"Jeu de planchettes Maison",stock:0,de:[["contre",1]],rend:1,unite:"contreplaqué"},
+  jeuSerre:{nom:"Jeu de planchettes Serre",stock:0,de:[["contre",1]],rend:1,unite:"contreplaqué"},
+  livretMaison:{nom:"Livret Maison",stock:0,de:[["kraft",1]],rend:1,unite:"feuille"},
+  livretSerre:{nom:"Livret Serre",stock:0,de:[["kraft",1]],rend:1,unite:"feuille"},
+  lampe:{nom:"Lampe soudée",stock:0,de:[["boitier",1],["pile",1],["led",1]],rend:1,unite:"lampe"},
+  pochkit:{nom:"Pochette de kit",stock:0,de:[["a3poch",1]],rend:1,unite:"feuille A3"},
+  sticker:{nom:"Sticker rond",stock:0,de:[["stickers",1]],rend:45,unite:"feuille"},
+  jeuscara:{nom:"Jeu scarabée",stock:0,de:[["contre",4],["peint_noire",0],["peint_vert brillant",0],["peint_blanche",0]],rend:16,unite:"série de 4 contreplaqués"},
+  cerclage:{nom:"Cerclage",stock:0,de:[["a4print",1]],rend:5,unite:"feuille A4"},
+});
+
+// Ce qu'il faut pour en faire 1
+function recette(x) {
+  if (x.presse) return [["m:planchette_"+x.presse,2],["m:bande",3],["m:cartonp",2],["f:elastique",2],["f:emb_presse",1]];
+  if (x.kit) return [["m:jeu"+x.kit,1],["m:livret"+x.kit,1],["m:lampe",1],["m:pochkit",1],["m:sticker",1]];
+  if (x.scarabee) return [["m:jeuscara",1],["m:cerclage",1]];
+  if (x.canard) return [["f:mdf",0],["f:attache",1],["f:pochplast",1]]; // canards : aucun conseillé ici, recette non détaillée
+  if (x.carnet) return [["f:carnetv",1]];
+  if (x.print) return [["f:carton"+x.print,1],["f:poch"+x.print,1]];
+  if (x.tampon) return [["f:gomme",0],["f:cube",1]];
+  return [];
+}
+
+// ───── État ─────
+const lignes = ARTICLES.map(([fam,nom,stock,a2p,[best,ou],x]) => ({ fam, nom, stock, a2p, best, ou, x, conseil: Math.max(0, Math.ceil(best*1.3) - stock) }));
+for (const [nom,stock] of TAMPONS) lignes.push({ fam:"Tampons", nom:"Tampon "+nom, stock, a2p:null, best:null, x:{tampon:1}, conseil: stock <= 5 ? MEDIANE_TAMPONS - stock : 0 });
+lignes.forEach((l,i) => { l.id = "a"+i; l.prod = l.conseil; });
+const verif = {}; // fourniture → {valeur, ok}
+const fait = {};  // ligne checklist → quantité produite
+
+function besoins() {
+  const fNeed = {}, mNeed = {};
+  const ajoute = (o,k,q) => o[k] = (o[k]||0) + q;
+  for (const l of lignes) if (l.prod > 0) for (const [ref,q] of recette(l.x)) {
+    const [t,k] = ref.split(":");
+    if (t === "m") ajoute(mNeed,k,q*l.prod); else ajoute(fNeed,k,q*l.prod);
+  }
+  // Prints : une feuille A3 = 1 A3, 2 A4 ou 4 A5, mélangés sur la feuille
+  let surface = 0;
+  for (const l of lignes) if (l.x.print && l.prod > 0) surface += l.prod * ({A3:1,A4:.5,A5:.25})[l.x.print];
+  if (surface) fNeed.printA3 = Math.ceil(surface - 1e-9);
+  // Fournitures maison : on utilise la réserve, puis on fabrique par matière entière
+  const aFaire = [];
+  for (const [k,q] of Object.entries(mNeed)) {
+    const m = M[k], manque = Math.max(0, q - m.stock);
+    const fois = manque ? Math.ceil(manque / m.rend) : 0;
+    for (const [fk,fq] of m.de) ajoute(fNeed, fk, fq*fois);
+    aFaire.push({ k, nom:m.nom, besoin:q, stock:m.stock, manque, fois, sort: fois*m.rend, unite:m.unite, rend:m.rend });
+  }
+  return { fNeed, aFaire, surface };
+}
+
+const tbody = (id) => document.querySelector("#"+id+" tbody");
+const el = (tag, props={}, ...enf) => { const e = document.createElement(tag); Object.assign(e, props); for (const c of enf.flat()) if (c != null) e.append(c); return e; };
+
+function dessinerProduire() {
+  const tb = tbody("t-produire"); tb.innerHTML = "";
+  let fam = null;
+  const tamponsAutres = [];
+  for (const l of lignes) {
+    if (l.fam === "Tampons" && l.conseil === 0) { tamponsAutres.push(l); continue; }
+    if (l.fam !== fam) {
+      fam = l.fam;
+      if (fam === "Tampons") ajouterPrintsAutres(tb);
+      tb.append(el("tr",{className:"famille"}, el("td",{colSpan:6, textContent: fam})));
+    }
+    tb.append(ligneProduire(l));
+  }
+  const reste = el("tr", {}, el("td", {colSpan:6}, el("details", {}, el("summary",{textContent:`${tamponsAutres.length} autres motifs, de 6 à 24 en stock : rien de conseillé`}),
+    el("div",{className:"calc", textContent: tamponsAutres.map(t => `${t.nom.replace("Tampon ","")} ${t.stock}`).join(" · ")}))));
+  tb.append(reste);
+  resumeProduire();
+}
+function ajouterPrintsAutres(tb) { tb.append(el("tr",{}, el("td",{colSpan:6, className:"calc", textContent: PRINTS_AUTRES}))); }
+function ligneProduire(l) {
+  let pill = null;
+  if (l.stock <= 0) pill = el("span",{className:"pill p-rupture", textContent:"épuisé"});
+  else if (l.fam === "Tampons" && l.stock <= 5) pill = el("span",{className:"pill p-bas", textContent:"bientôt épuisé"});
+  const calc = l.fam === "Tampons"
+    ? (l.conseil ? `remonter à ${MEDIANE_TAMPONS} comme les autres motifs : ${MEDIANE_TAMPONS} − ${l.stock}` : "")
+    : `${l.best} vendus (${l.ou}) + 30 % = ${Math.ceil(l.best*1.3)} − ${l.stock} en stock`;
+  const inp = el("input", { className:"q", id:"prod-"+l.id, type:"text", inputMode:"numeric", value: String(l.prod), ariaLabel: "À produire : "+l.nom });
+  inp.addEventListener("input", () => { const v = parseInt(inp.value,10); l.prod = Number.isFinite(v) && v > 0 ? v : 0; resumeProduire(); dessinerVerifier(); dessinerChecklist(); });
+  return el("tr", {},
+    el("td", {}, l.nom, " ", pill),
+    el("td", {className:"n", textContent: l.stock}),
+    el("td", {className:"n cache-tel", textContent: l.a2p ?? "—"}),
+    el("td", {className:"n cache-tel", textContent: l.best ?? "—"}),
+    el("td", {}, el("span",{className:"calc", textContent: l.conseil ? `${l.conseil} · ${calc}` : (l.fam==="Tampons" ? "" : `0 · ${calc}`)})),
+    el("td", {className:"n"}, inp));
+}
+function resumeProduire() {
+  const par = {};
+  for (const l of lignes) if (l.prod > 0) par[l.fam] = (par[l.fam]||0) + l.prod;
+  const r = document.getElementById("resume-produire"); r.innerHTML = "";
+  r.append(el("span",{}, "À produire : "));
+  for (const [f,q] of Object.entries(par)) r.append(el("span",{}, el("b",{textContent:q}), " "+f.toLowerCase()));
+}
+
+function lot(q, lots) { if (!lots || !lots.length) return { q, txt: "" }; const t = lots.find(x => x >= q) ?? lots[lots.length-1]; const n = Math.ceil(q / t); return { q: n*t, txt: ` (${n} lot${n>1?"s":""} de ${t})` }; }
+
+function dessinerVerifier() {
+  const { fNeed } = besoins();
+  const tb = tbody("t-verifier"); tb.innerHTML = "";
+  const cles = Object.keys(fNeed).filter(k => fNeed[k] > 0 || F[k].sans).sort((a,b) => rang(a, fNeed) - rang(b, fNeed));
+  let restants = 0;
+  for (const k of cles) {
+    const f = F[k], q = fNeed[k], v = verif[k];
+    let pill, texteReste;
+    if (f.sans) { pill = el("span",{className:"pill p-sans", textContent:"pas de quantité : vérifie qu'il en reste"}); texteReste = "—"; }
+    else if (f.stock === null) { pill = el("span",{className:"pill p-inconnu", textContent:"jamais compté"}); texteReste = "?"; }
+    else if (q > f.stock) { pill = el("span",{className:"pill p-manque", textContent:`manque ${q - f.stock}`}); texteReste = f.stock; }
+    else if (f.seuil != null && f.stock - q < f.seuil) { pill = el("span",{className:"pill p-bas", textContent:`zone critique : il en restera ${f.stock - q}`}); texteReste = f.stock; }
+    else { pill = el("span",{className:"pill p-ok", textContent:"devrait suffire"}); texteReste = f.stock; }
+    const fini = v && v.ok;
+    if (!fini) restants++;
+    const champ = f.sans ? el("span",{className:"calc", textContent:"—"}) : el("input",{ className:"q", id:"v-"+k, type:"text", inputMode:"numeric", value: v?.valeur ?? "", placeholder: f.stock ?? "", ariaLabel: "J'en ai : "+f.nom });
+    const bouton = el("button",{ className:"btn-p", type:"button", textContent: fini ? "vérifié" : (f.sans ? "il en reste" : "OK"), ariaPressed: String(!!fini) });
+    bouton.addEventListener("click", () => {
+      const val = f.sans ? null : (champ.value.trim() === "" ? f.stock : parseInt(champ.value,10));
+      if (!f.sans && !Number.isFinite(val)) { champ.focus(); champ.placeholder = "combien ?"; return; }
+      verif[k] = fini ? undefined : { valeur: f.sans ? null : val, ok: true };
+      dessinerVerifier();
+    });
+    tb.append(el("tr", {},
+      el("td",{}, f.nom, f.recup ? el("span",{className:"calc", textContent:" · récup"}) : null),
+      el("td",{className:"n", textContent: f.sans ? "un peu" : q}),
+      el("td",{className:"n", textContent: texteReste}),
+      el("td",{}, pill),
+      el("td",{className:"n"}, champ),
+      el("td",{}, bouton)));
+  }
+  document.getElementById("etat-verif").textContent = restants ? `${restants} ligne${restants>1?"s":""} à vérifier sur ${cles.length}` : "Tout est vérifié.";
+  const pret = document.getElementById("pret"); pret.disabled = restants > 0;
+  document.getElementById("commande").hidden = true;
+  pret.onclick = () => {
+    const ul = el("ul");
+    const alertes = [];
+    for (const k of cles) {
+      const f = F[k]; if (f.sans) continue;
+      const a = verif[k].valeur, manque = fNeed[k] - a;
+      if (manque <= 0) continue;
+      if (f.recup) { alertes.push(`Gardez des cartons : il faut ${fNeed[k]} planches de carton, vous en avez ${a}.`); continue; }
+      const l = lot(manque, f.lots);
+      ul.append(el("li",{textContent:`${f.nom} : ${l.q}${l.txt} · il en faut ${fNeed[k]}, vous en avez ${a}`}));
+    }
+    const c = document.getElementById("commande"); c.innerHTML = "";
+    c.append(el("b",{textContent: ul.children.length ? "À commander" : "Rien à commander."}), ul, ...alertes.map(t => el("div",{textContent:t})));
+    c.hidden = false;
+    document.getElementById("f2").classList.add("fait");
+  };
+}
+function rang(k, need) { const f = F[k]; if (f.sans) return 3; if (f.stock === null) return 1; if (need[k] > f.stock) return 0; return 2; }
+
+function dessinerChecklist() {
+  const { aFaire } = besoins();
+  const tb = tbody("t-checklist"); tb.innerHTML = "";
+  const maison = aFaire.filter(m => m.besoin > 0);
+  if (maison.length) tb.append(el("tr",{className:"famille"}, el("td",{colSpan:5, textContent:"Fournitures maison"})));
+  for (const m of maison) {
+    const detail = m.manque
+      ? `il en faut ${m.besoin}, il en reste ${m.stock} → au moins ${m.manque} · ${m.fois} ${m.unite}${m.fois>1&&!m.unite.includes(" ")?"s":""} → ${m.sort}${m.sort>m.manque?` (${m.sort-m.manque} en réserve)`:""}`
+      : `il en faut ${m.besoin}, la réserve suffit (${m.stock})`;
+    tb.append(ligneCheck("m-"+m.k, m.nom, m.manque ? m.sort : 0, detail));
+  }
+  let fam = null;
+  for (const l of lignes) if (l.prod > 0) {
+    if (l.fam !== fam) { fam = l.fam; tb.append(el("tr",{className:"famille"}, el("td",{colSpan:5, textContent: fam}))); }
+    tb.append(ligneCheck(l.id, l.nom, l.prod, ""));
+  }
+}
+function ligneCheck(id, nom, prevu, detail) {
+  const v = fait[id];
+  const inp = el("input",{ className:"q", id:"c-"+id, type:"text", inputMode:"numeric", value: v ?? "", placeholder: String(prevu), ariaLabel:"Produit : "+nom });
+  const b = el("button",{ className:"btn-p", type:"button", textContent: v != null ? "c'est fait" : "c'est fait ?", ariaPressed: String(v != null) });
+  b.addEventListener("click", () => {
+    if (fait[id] != null) delete fait[id];
+    else { const n = inp.value.trim() === "" ? prevu : parseInt(inp.value,10); if (!Number.isFinite(n)) return; fait[id] = n; }
+    dessinerChecklist();
+  });
+  return el("tr", { className: v != null ? "ligne-faite" : "" },
+    el("td",{textContent:nom}), el("td",{className:"n", textContent: prevu || "—"}),
+    el("td",{className:"calc cache-tel", textContent: detail}), el("td",{className:"n"}, inp), el("td",{}, b));
+}
+
+dessinerProduire(); dessinerVerifier(); dessinerChecklist();
+</script>

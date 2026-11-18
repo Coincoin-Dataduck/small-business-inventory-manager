@@ -7,14 +7,15 @@ Validée question par question avec Clément (novembre 2026). Les « ? » sont d
   - **À vendre** : articles prêts pour le stand ;
   - **Fait maison** : réserves préparées d'avance, qui peuvent rester des mois (ex. 40 canards peints et découpés, en boîte) ;
   - **Acheté** ou **récup** : fournitures.
-- Fabriquer = **une étape qui transforme des stocks en un autre stock**, faite à son rythme :
-  - certaines **par matière entière** (« peindre et découper une planche » → ~50 canards découpés) : une plaque/feuille est toujours consommée entière ;
-  - d'autres **à la pièce** (« monter 10 canards »).
-- **Planification** : pour l'objectif d'un article, partir de ce qui est déjà fait maison et **ne remonter à l'étape précédente que si la réserve ne suffit pas**. Proposer les étapes dans l'ordre où les faire. Ce qui dépasse le besoin part en réserve (et le dire).
+- **Recette = « ce qu'il faut pour en faire »** (décision du 18/11/2026, remplace les étapes de fabrication) : pour 1 article, quelles fournitures et combien (1 Mini-presse = 2 planchettes du modèle + 3 bandes de buvard + 2 cartons + 2 élastiques + 1 emballage) ; pour une fourniture maison, ce qu'elle consomme et son rendement (1 plaque MDF A3 → 25 planchettes ; 1 feuille A4 → 5 cerclages). Pas d'ordre d'étapes, pas de temps par étape, pas de suivi de ce qui est « en cours ».
+  - La fourniture maison se fait **par matière entière** (une plaque donne toujours ses 25 planchettes : le surplus va en réserve) ; une plaque peinte = un seul modèle.
+  - Prints : 1 feuille print A3 = 1 A3, 2 A4 ou 4 A5, mélangés sur la feuille (toujours découpée entièrement) ; puis 1 carton + 1 pochette du format.
+  - Fournitures entamées par morceaux (feuille de gomme) et peinture : **pas de quantité**, seulement « vérifier qu'il en reste ». Graver se fait au nombre de tampons voulu, pas par feuille entière.
+- **Les fournitures maison en stock sont utilisées d'abord** ; on ne fabrique que ce qui manque, et on le dit (« il en faut 22, il en reste 0 → 1 plaque → 25, 3 en réserve »).
 - **Pas de réservation** de pièces.
-- Pièces partagées entre familles (MDF A3 : mini-presses + canards ; contreplaqué A3 : kits + scarabées) : les besoins s'additionnent.
-- **Temps** par étape (par pièce ou par matière entière) ; la charge affichée ne compte que ce qu'il reste à faire.
-- Rendements variables (ex. gomme : ~150 tampons par feuille) : valeur de départ, affinée par les quantités réellement déclarées.
+- Fournitures partagées entre familles (MDF A3 : mini-presses + canards ; contreplaqué A3 : kits + scarabées) : les besoins s'additionnent.
+- Le stock des fournitures **achetées** est approximatif (d'autres usages que la boutique, bouts de feuille) : l'outil ne l'affirme pas, il dit quoi **vérifier** (voir §3).
+- Rendements variables : valeur de départ, affinée par les quantités réellement déclarées. Rendement inconnu (cartonnettes par feuille) : laissé vide, demandé la première fois qu'on déclare en avoir produit.
 
 ## 2. Ventes et corrections
 - Ventes importées automatiquement depuis **SumUp**. Ko-fi abandonné.
@@ -45,9 +46,14 @@ Validée question par question avec Clément (novembre 2026). Les « ? » sont d
 - **Tout tourne autour des salons** : pas de stock minimum hors salon.
 - Un salon = nom, type, dates, nombre de jours, fréquentation attendue.
 - Salons trop rapprochés pour refaire du stock entre eux (écart < seuil, 14 jours par défaut) sont **proposés** dans une même **préparation** ; Séparer / Regrouper à la main, retour possible à la proposition.
-- Objectif par article et par salon ; objectif de la préparation = somme ; marge (30 % par défaut) appliquée **une seule fois** par préparation.
-- Étapes d'une préparation : Objectifs → Comptage avant → Bilan (ventes carte automatiques + saisie des espèces par article).
-- **Recommandation** : voir `historique-salons.md` (tampons comme thermomètre, meilleur ratio passé, case « mal exposé ou épuisé » au bilan). L'outil recommande, Hervine/Clément fixent.
+- Une préparation **commence 15 jours avant** son premier salon (pas de charge de travail en heures).
+- **Écran de préparation** (décision du 18/11/2026, maquette : https://claude.ai/artifact/3gyi4HfmXJAw5WhoBF2U6K) — remplace Objectifs + Atelier :
+  1. **Quoi produire** : par article, stock, ventes (Art2Play / meilleur salon), conseil avec son calcul, et le **nombre à produire** (prérempli avec le conseil, Hervine/Clément décident). Épuisé / bientôt épuisé visibles.
+  2. **Fournitures à vérifier** : pour chaque fourniture, il en faut X (fournitures maison en stock déduites), il devrait en rester Y, et un état : manque, zone critique (sous le seuil après usage), jamais compté, devrait suffire, pas de quantité. **Chaque ligne se vérifie**, même celles qui paraissent bonnes (« OK » ou « j'en ai N » = comptage). Quand tout est vérifié : « on passe les commandes » → liste à commander arrondie aux lots (récup : alerte « gardez des cartons »).
+  3. **Ce qu'on a produit** : checklist, fournitures maison puis articles ; « produit, combien ? » ajoute au stock et retire les fournitures utilisées (théorique, recalé au comptage).
+  4. **Comptage avant** le salon (inchangé). Puis Bilan après le salon (inchangé).
+- **Conseil (proposition à confirmer)** : articles = ventes au meilleur salon + 30 % − stock (ne tient pas compte de la taille du salon) ; tampons (motif inconnu à la caisse) = remonter au niveau médian des autres motifs ceux qui en ont 5 ou moins. Il doit toujours faire apparaître un modèle populaire en rupture. Méthode précédente (tampons prévus × ratio pour 100 tampons) : voir `historique-salons.md` ; elle ne s'appuyait que sur Art2Play, les salons passés n'étant pas saisis dans l'outil.
+- **Seuil d'alerte** par fourniture achetée : sous le seuil, elle est signalée « à vérifier » (dans la préparation et hors préparation).
 
 ## 4. Achats
 - Chaque ligne détaille son calcul (« il en faut X − Y en stock − Z en route ») et une date « à commander avant le … » (premier salon − délai fournisseur).
@@ -63,7 +69,8 @@ Validée question par question avec Clément (novembre 2026). Les « ? » sont d
 - Fonctionnement (interrupteurs) : regroupement auto des salons, seuil, marge, marge unique par préparation, temps de travail, contrôle de cohérence des tampons.
 - Arrêter un produit : « Fin de série » (réversible) : le stock restant se vend, plus de fabrication ni d'achat de ses pièces.
 
-## 6. Catalogue (articles actifs) et étapes
+## 6. Catalogue (articles actifs) et recettes
+_Tableau d'origine (16/11/2026) ; corrections du 18/11 au §8. Les « étapes » se lisent désormais comme « ce qu'il faut pour en faire » (§1)._
 | Article | Étapes (matière → fait maison → article) |
 |---|---|
 | Prints (11 dessins × A5 / A4 / A3) | imprimer : 1 feuille print A3 → 1 A3 / 2 A4 / 4 A5 (dessins mélangés, jamais de perte) → découper/emballer : + 1 carton et 1 pochette du format |
@@ -97,6 +104,8 @@ Inconnus : papier print A3/A4, cartons et pochettes A5/A4/A3, MDF, élastiques, 
 Encre d'imprimante (EcoTank ET8550), encre de linogravure, emballage de la Collection, gachapon (contient surtout des tampons).
 
 ## 8. Points ouverts
+- Écran de préparation (18/11/2026), à confirmer : règle du conseil ; seuil d'alerte (nombre fixe par fourniture ou % du dernier lot) ; encreurs achetés-revendus (proposé : au temps 2, « N en stock, ~M vendus → en racheter ») ; recettes supposées pour la maquette : 1 cerclage par scarabée, 1 sticker rond par kit, 1 cube par tampon.
+- Corrections de données décidées le 18/11/2026 : supprimer « Planche de MDF A3 » (doublon de « Plaque MDF A3 », fourniture commune) ; peinture sortie des recettes ; planche de MDF peinte par modèle ; 25 planchettes par plaque ; Kits : soudure lampe = boîtier + pile + LED → 1 lampe, épinglée dans le livret ; 1 feuille A3 → 1 pochette de kit ; cerclages imprimés puis découpés au plotter (toute la feuille).
 - Rendements : planche de carton → combien de cartons ? cartonnettes par feuille ?
 - Pochette du kit : kraft ou autre papier ?
 - Prints : à « C'est fait », on indique quels dessins sont sortis de la feuille (validé).

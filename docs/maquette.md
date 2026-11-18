@@ -6,6 +6,8 @@ Sources copiées ici : `docs/maquette/ordinateur.dc.html`, `docs/maquette/teleph
 
 Toutes les quantités, les salons de décembre et les temps sont des **exemples**. Les ratios et l'historique des salons sont réels.
 
+**Mise à jour du 18/11/2026** : Atelier et Objectifs sont remplacés par l'**écran de préparation** (maquette validée : https://claude.ai/artifact/3gyi4HfmXJAw5WhoBF2U6K, spec §3). Les descriptions Atelier / À faire / recettes par étapes ci-dessous sont caduques.
+
 ## Ordinateur (usage principal) — menu latéral
 - Encart permanent « On prépare » : préparation en cours, date limite, J-x.
 - **Stock** : tableau par famille ; chaque ligne marquée À vendre / Fait maison / Acheté / Récup ; filtres par famille ; bouton par ligne « Compter » ; bouton « Faire un comptage » (colonne « compté », écarts en direct, enregistrer). Bandeau anti-oubli : « SumUp a vendu 2 X alors qu'il n'en restait plus. Combien en aviez-vous vraiment ? »
