@@ -1984,7 +1984,7 @@ function dessinerAccueil() {
     const n = Math.max(0, joursEntre(a, b) + 1);
     bande.style.left = centre(a) + "%";
     bande.style.width = Math.max(0, centre(b) - centre(a)) + "%";
-    texteFab.textContent = `Fabrication · ${n} jour${n > 1 ? "s" : ""}` + (d.fabrication.travail_min ? ` · ≈ ${dureeTexte(d.fabrication.travail_min)} de travail` : "");
+    texteFab.textContent = `Production · ${n} jour${n > 1 ? "s" : ""}`;
   };
   placerBande(fab0.date, fab1.date);
   for (const [j, cote] of [[fab0, "g"], [fab1, "d"]]) bande.append(poignee(j, cote));
