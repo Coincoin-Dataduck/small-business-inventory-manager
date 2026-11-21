@@ -19,6 +19,12 @@ La conception a été faite et validée en amont, dans une conversation sur clau
 - Interface pour non-initiés : vocabulaire terrain, choix par défaut assumés. Mots à l'écran : Article / à vendre, Fourniture maison (préparée d'avance), Fourniture achetée, Récup, Objectif, Préparation, Compter. Jamais : pièce (au sens d'élément de stock ; « à la pièce » = à l'unité reste correct), SKU, nomenclature, fournée, encours, réappro.
 - L'ordinateur est l'usage principal ; le téléphone est un sous-ensemble (À faire, Compter, Questions).
 
+## Mise en ligne : toujours vérifier avant (demandé par Clément, 21/11/2026)
+- **Déployer uniquement avec `npm run deploy`**, jamais `wrangler deploy` directement : la commande lance d'abord `scripts/verifier.sh` et ne déploie rien si elle échoue.
+- `scripts/verifier.sh` (= `npm run verifier`) : types TypeScript, base locale neuve (migrations + `scripts/verifier/donnees.sql`, données fictives), serveur local, puis `scripts/verifier/pages.cjs` ouvre chaque page dans un navigateur (directement et via le menu), fait quelques saisies de Préparation, et échoue à la moindre erreur JavaScript, réponse d'API en erreur ou message d'erreur affiché.
+- Nouvelle page ou nouvel écran : l'ajouter à `PAGES` dans `scripts/verifier/pages.cjs`. Route d'API supprimée : chercher ses appels dans `public/app.js` (deux pannes passées : Accueil après l'Atelier, Réglages après `/etapes`).
+- Ne jamais annoncer « c'est en ligne » sans que la vérification soit passée.
+
 ## Architecture retenue
 - **Cloudflare (gratuit)** : un Worker (API + pages), base **D1** (SQLite), **Cron Trigger** pour importer les ventes SumUp, accès protégé par **Cloudflare Access**.
 - Déploiement : `wrangler` avec `CLOUDFLARE_API_TOKEN` / `CLOUDFLARE_ACCOUNT_ID` (variables d'environnement de la session), ou Workers Builds branché sur ce dépôt.

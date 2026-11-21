@@ -707,7 +707,7 @@ function ongletsReglages(actif) {
 
 async function pageReglages() {
   if (etat.params[0] === "recettes") { await pageRecettes(etat.params[1]); return; }
-  [etat.familles, etat.stock, etat.etapes, etat.correspondances, etat.reglages, etat.retires] = await Promise.all([api("/familles"), api("/stock"), api("/etapes"), api("/correspondances"), api("/reglages"), api("/pieces/retires")]);
+  [etat.familles, etat.stock, etat.correspondances, etat.reglages, etat.retires] = await Promise.all([api("/familles"), api("/stock"), api("/correspondances"), api("/reglages"), api("/pieces/retires")]);
   dessinerReglages();
 }
 

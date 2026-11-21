@@ -4,10 +4,11 @@
   "type": "module",
   "scripts": {
     "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "deploy": "bash scripts/verifier.sh && wrangler deploy",
     "db:local": "wrangler d1 migrations apply stock-hervine --local",
     "db:remote": "wrangler d1 migrations apply stock-hervine --remote",
-    "check": "tsc --noEmit"
+    "check": "tsc --noEmit",
+    "verifier": "bash scripts/verifier.sh"
   },
   "dependencies": {
     "hono": "^4.13.19"
